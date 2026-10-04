@@ -85,6 +85,17 @@ test('concurrent edits cannot overwrite each other; new state survives another s
   assert.deepEqual(saved.data,empty);
   assert.equal((await (await state(orgB,cookieB)).json()).version,0);
 });
+test('property export downloads saved text only for members of the owning organization',async()=>{
+ const current=await (await state(orgA,cookieA)).json();
+ const property={id:7001,title:'Exportación de prueba',reference:'REF-TEST',location:'',price:'165.000 €',built:'',useful:'',beds:'',baths:'',floor:'',extras:'',photos:0,url:''};
+ const draft={id:7002,title:property.title,type:'Publicación',channel:'Instagram',status:'pending',date:'2026-10-04',caption:'Texto guardado y revisado',icon:'⌂',propertyRef:'inmueble:7001'};
+ assert.equal((await state(orgA,cookieA,'PUT',{version:current.version,data:{properties:[property],content:[draft],workflowStep:4}})).status,200);
+ const path=`${origin}/api/organizations/${orgA}/properties/7001/export`;
+ const own=await fetch(path,{headers:{Cookie:cookieA}});assert.equal(own.status,200);assert.match(own.headers.get('content-disposition'),/attachment/);assert.match(await own.text(),/Texto guardado y revisado/);
+ assert.equal((await fetch(path,{headers:{Cookie:cookieB}})).status,404);
+ assert.equal((await fetch(path)).status,401);
+ assert.equal((await fetch(path,{headers:{Cookie:cookieViewer}})).status,200);
+});
 test('membership revocation and logout revoke existing sessions',async()=>{
   await db.exec('RESET ROLE');
   await db.query('DELETE FROM rss_memberships WHERE user_id=$1 AND organization_id=$2',[userB,orgB]);
