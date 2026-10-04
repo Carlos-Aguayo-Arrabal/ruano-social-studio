@@ -18,7 +18,7 @@ export async function createApp({ pool, origin, production = false }) {
   function send(res, status, body, type = 'application/json; charset=utf-8', extra = {}) {
     res.writeHead(status, {
       'Content-Type':type, 'X-Content-Type-Options':'nosniff', 'X-Frame-Options':'DENY',
-      'Referrer-Policy':'no-referrer', 'Cache-Control':'no-store',
+      'Referrer-Policy':'same-origin', 'Cache-Control':'no-store',
       'Permissions-Policy':'camera=(), microphone=(), geolocation=()',
       'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       ...extra,
