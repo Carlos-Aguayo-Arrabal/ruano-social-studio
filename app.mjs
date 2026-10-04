@@ -83,6 +83,20 @@ export async function createApp({ pool, origin, production = false }) {
           JOIN rss_memberships m ON m.organization_id=o.id WHERE m.user_id=$1 ORDER BY o.name`,[user.id]);
         return send(res,200,{user:{email:user.email},organizations:rows});
       }
+      const downloadRoute = /^\/api\/organizations\/([^/]+)\/properties\/(\d+)\/export$/.exec(url.pathname);
+      if (downloadRoute && req.method === 'GET') {
+        if (!uuid.test(downloadRoute[1])) return send(res,404,{error:'Empresa no disponible'});
+        const result = await withOrganization(pool,user.id,downloadRoute[1],async client => {
+          const {rows} = await client.query('SELECT version,data FROM rss_states WHERE organization_id=$1',[downloadRoute[1]]);
+          const data=rows[0]?.data, property=data?.properties.find(p=>p.id===Number(downloadRoute[2]));
+          if (!property) { const e=new Error('Inmueble no disponible');e.status=404;throw e; }
+          const items=data.content.filter(x=>x.propertyRef==='inmueble:'+property.id||x.propertyRef===property.reference);
+          if (!items.length) { const e=new Error('Crea primero los borradores');e.status=404;throw e; }
+          const fields=[['Referencia',property.reference],['Ubicación',property.location],['Precio',property.price],['Superficie construida (m²)',property.built],['Superficie útil (m²)',property.useful],['Dormitorios',property.beds],['Baños',property.baths],['Planta',property.floor],['Características',property.extras],['Enlace',property.url]].filter(x=>x[1]).map(x=>x[0]+': '+x[1]).join('\n');
+          return property.title+'\n'+fields+'\n\n'+items.map(x=>x.type+' · '+x.date+' · '+x.status+'\n'+x.caption).join('\n\n────────\n\n');
+        });
+        return send(res,200,result,'text/plain; charset=utf-8',{'Content-Disposition':`attachment; filename="inmueble-${downloadRoute[2]}-textos.txt"`});
+      }
       const route = /^\/api\/organizations\/([^/]+)\/state$/.exec(url.pathname);
       if (route) {
         if (!uuid.test(route[1])) return send(res,404,{error:'Empresa no disponible'});
