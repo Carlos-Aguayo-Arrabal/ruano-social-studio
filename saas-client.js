@@ -72,5 +72,5 @@ window.RSS = (() => {
       card.append(text,button); list.append(card);
     }
   }
-  return {ready,save,html,renderCompanies};
+  return {ready,save,html,renderCompanies,exportPropertyUrl:id=>`/api/organizations/${organization.id}/properties/${id}/export`};
 })();
