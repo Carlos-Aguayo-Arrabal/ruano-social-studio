@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
+import { validateState } from '../state.mjs';
 const html = await readFile(new URL('../index.html',import.meta.url),'utf8');
 const client = await readFile(new URL('../saas-client.js',import.meta.url),'utf8');
 const inline = /<script>\s*([\s\S]*?)<\/script>/.exec(html)[1];
@@ -60,4 +61,30 @@ test('save conflict blocks further editing and offers export rather than reporti
     assert.match(alert.textContent,/No se ha confirmado el guardado/);
     assert.match(alert.textContent,/Descargar mis cambios/);
   }finally{page.close()}
+});
+
+test('verified property fields persist, generate linked drafts without invented data and remain editable',async()=>{
+ const page=await preview();try{
+  const d=page.window.document;
+  d.querySelector('#importListing').click();
+  const form=d.querySelector('#propertyForm');
+  for(const [key,value] of Object.entries({title:'Vivienda de prueba <segura>',reference:'TEST-1',location:'Almería',price:'165.000 €',beds:'2',url:'https://example.test/vivienda',extras:'Terraza confirmada'}))form.elements.namedItem(key).value=value;
+  form.dispatchEvent(new page.window.Event('submit',{bubbles:true,cancelable:true}));
+  await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(page.writes.at(-1).body.data.properties[0].beds,'2');
+  assert.equal(d.querySelector('#propertiesList segura'),null);
+  d.querySelector('[data-generate-pack]').click();await new Promise(resolve=>setTimeout(resolve,25));
+  const data=page.writes.at(-1).body.data;
+  assert.deepEqual(validateState({version:0,data}).data,data);
+  const pack=data.content.filter(x=>x.propertyRef);
+  assert.equal(pack.length,4);assert.equal(new Set(pack.map(x=>x.type)).size,4);
+  for(const item of pack){assert.match(item.caption,/Terraza confirmada/);assert.match(item.caption,/165.000/);assert.doesNotMatch(item.caption,/Baños|piscina/);assert.equal(item.status,'pending')}
+  d.querySelector('[data-edit]').click();const composer=d.querySelector('#composerForm');
+  composer.elements.details.value='Texto revisado por la agencia';
+  composer.dispatchEvent(new page.window.Event('submit',{bubbles:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.ok(page.writes.at(-1).body.data.content.some(x=>x.caption==='Texto revisado por la agencia'));
+  d.querySelectorAll('#companiesList button')[1].click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(d.querySelector('#propertyModal').classList.contains('open'),false);
+  assert.match(d.querySelector('#propertiesList').textContent,/Aún no hay inmuebles/);
+ }finally{page.close()}
 });
