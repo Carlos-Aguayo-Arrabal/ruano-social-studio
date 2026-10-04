@@ -67,7 +67,7 @@ No pasar contraseñas como argumentos ni guardarlas en el código. Si el usuario
 
 npm run check y npm test. Las pruebas usan PostgreSQL embebido PGlite y un DOM simulado: cubren SQL, autenticación, aislamiento, rol viewer, CSRF, sesiones, conflicto de versiones, escape HTML y cambio de empresa. No sustituyen una prueba contra PostgreSQL 16/17 ni una comprobación de navegador real.
 
-En el entorno aislado: crear dos empresas y usuarios, abrir sesiones separadas, crear contenido, recargar, cambiar empresa, manipular el ID de empresa en llamadas API y comprobar denegación. Probar también un usuario viewer, dos ediciones concurrentes, logout y revocación de membresía. Construir y comprobar la imagen Docker; no se ha construido en el entorno de desarrollo por ausencia de Docker.
+En el entorno aislado: crear dos empresas y usuarios, abrir sesiones separadas, crear contenido, recargar, cambiar empresa, manipular el ID de empresa en llamadas API y comprobar denegación. Probar también un usuario viewer, dos ediciones concurrentes, logout y revocación de membresía. La imagen Docker se construyó y comprobó en un entorno aislado del VPS el 4 de octubre de 2026. Véase [verificación del VPS](docs/verification.md). Sigue pendiente la comprobación manual en navegador con HTTPS y proxy.
 
 El limitador de login en memoria permite 10 intentos por email y 100 por dirección de conexión cada 15 minutos. Detrás de Traefik esta dirección puede ser la del proxy: añadir límites en el proxy con configuración de cabeceras confiables, sin aceptar X-Forwarded-For arbitrario. Con varias réplicas se requiere un limitador compartido. CSP conserva unsafe-inline para la interfaz heredada; una fase posterior debe extraer los scripts y endurecer esa política.
 
