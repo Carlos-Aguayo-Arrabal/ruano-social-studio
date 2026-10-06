@@ -5,10 +5,10 @@ import { JSDOM } from 'jsdom';
 import { validateState } from '../state.mjs';
 const html = await readFile(new URL('../index.html',import.meta.url),'utf8');
 const client = await readFile(new URL('../saas-client.js',import.meta.url),'utf8');
-const inline = /<script>\s*([\s\S]*?)<\/script>/.exec(html)[1];
+const inline = ''; // All application JavaScript is external to enforce script-src self.
 const idA='aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa',idB='bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
 const content={id:1,title:'<img src=x onerror="window.attacked=true">',caption:'<script>window.attacked=true</script>',type:'Publicación',channel:'Instagram',status:'pending',date:'2026-10-04',icon:'⌂'};
-async function preview({failSave=false}={}) {
+async function preview({failSave=false,role='owner',savedData}={}) {
   const dom=new JSDOM(html,{url:'http://localhost',runScripts:'outside-only',pretendToBeVisual:true});
   const window=dom.window;window.structuredClone=structuredClone;
   window.HTMLCanvasElement.prototype.getContext=()=>({});
@@ -16,12 +16,12 @@ async function preview({failSave=false}={}) {
   const writes=[];
   window.fetch=async(path,options={})=>{
     let body;
-    if(path==='/api/me')body={user:{email:'test@example.test'},organizations:[{id:idA,name:'Empresa A',role:'owner'},{id:idB,name:'Empresa B',role:'owner'}]};
+    if(path==='/api/me')body={user:{email:'test@example.test'},organizations:[{id:idA,name:'Empresa A',role},{id:idB,name:'Empresa B',role:'owner'}]};
     else if(options.method==='PUT'){
       writes.push({path,body:JSON.parse(options.body)});
       if(failSave)return {ok:false,status:409,json:async()=>({error:'Conflicto de versión'})};
       body={version:1,data:JSON.parse(options.body).data};
-    }else body={version:0,data:{content:path.includes(idA)?[content]:[],properties:[],workflowStep:1}};
+    }else body={version:0,data:path.includes(idA)&&savedData?savedData:{content:path.includes(idA)?[content]:[],properties:[],workflowStep:1}};
     return {ok:true,status:200,json:async()=>body};
   };
   window.eval(client);window.eval(inline);
@@ -87,4 +87,22 @@ test('verified property fields persist, generate linked drafts without invented 
   assert.equal(d.querySelector('#propertyModal').classList.contains('open'),false);
   assert.match(d.querySelector('#propertiesList').textContent,/Aún no hay inmuebles/);
  }finally{page.close()}
+});
+
+test('brand configuration saves only for its organization and does not leak when switching',async()=>{
+ const page=await preview();try{const d=page.window.document;d.querySelector('[data-action=manage-brand]').click();
+ const f=d.querySelector('#brandForm');f.elements.name.value='Mi marca';f.elements.phone.value='Teléfono público';f.elements.website.value='https://example.test';f.elements.color.value='#234567';
+ f.dispatchEvent(new page.window.Event('submit',{bubbles:true,cancelable:true}));await new Promise(r=>setTimeout(r,25));
+ assert.equal(page.writes.at(-1).body.data.brand.name,'Mi marca');assert.equal(d.querySelector('#sidebarBrandName').textContent,'Mi marca');assert.match(d.querySelector('#footerText').value,/example.test/);
+ d.querySelectorAll('#companiesList button')[1].click();await new Promise(r=>setTimeout(r,25));assert.equal(d.querySelector('#sidebarBrandName').textContent,'Empresa B');assert.equal(d.querySelector('#footerText').value,'');
+ }finally{page.close()}
+});
+test('restored property context approves the intended package in one save; readonly controls are disabled',async()=>{
+ const p={id:12,title:'Inmueble elegido',reference:'SEL-12',photos:0},other={id:13,title:'Otro inmueble',reference:'SEL-13',photos:0};
+ const draft={...content,title:'Paquete seleccionado',propertyRef:'inmueble:12',caption:'Texto verificado'};
+ const savedData={properties:[other,p],content:[draft,{...draft,id:2,propertyRef:'inmueble:13'}],selectedPropertyId:12,workflowStep:4};
+ const page=await preview({savedData});try{page.window.document.querySelector('#approvePropertyPack').click();await new Promise(r=>setTimeout(r,25));
+ assert.equal(page.writes.length,1);assert.equal(page.writes[0].body.data.content[0].status,'approved');assert.equal(page.writes[0].body.data.content[1].status,'pending');assert.equal(page.writes[0].body.data.workflowStep,5);
+ }finally{page.close()}
+ const viewer=await preview({savedData,role:'viewer'});try{assert.equal(viewer.window.document.querySelector('#approvePropertyPack').disabled,true);viewer.window.document.querySelector('[data-action=manage-brand]').click();assert.equal(viewer.window.document.querySelector('#saveBrand').disabled,true);assert.equal(viewer.writes.length,0)}finally{viewer.close()}
 });

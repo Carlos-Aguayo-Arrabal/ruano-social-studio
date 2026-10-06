@@ -10,11 +10,14 @@ Primera fase para convertir el planificador en una aplicación compartida: login
 - Nombres y textos escapados en la interfaz; bloqueo de edición y exportación de cambios si falla el guardado.
 - Fichas editables de inmuebles (referencia, precio, superficies, ubicación, características y enlace), cuatro borradores derivados solo de campos rellenados, edición de texto y descarga del paquete en TXT. Cambiar un texto lo devuelve a pendiente de aprobación. Las modificaciones de ficha no sobrescriben borradores existentes.
 - Entrada manual de inmuebles y borradores de plantilla. No se introducen inmuebles ni publicaciones de demostración en nuevas empresas.
+- Perfil de marca por empresa: nombre, lema, web, teléfono, color y logotipo PNG/JPEG de hasta 300 KB. Solo owner puede cambiarlo; editor debe conservarlo y viewer consulta. El logotipo heredado de Ruano se usa únicamente para su empresa hasta configurar su marca.
+- Inmueble seleccionado persistente para continuar tras recargar. Aprobación de paquete en un solo guardado; rechaza textos vacíos y nueva programación en el pasado. Calendario editable y contador de próximas 14 jornadas.
+- JavaScript externo con CSP sin unsafe-inline para scripts.
 - Editor de fotos local; al cambiar empresa se limpia su sesión de edición. Las fotos no se suben ni persisten en el servidor.
 
 ## Pendiente
 
-Integración con n8n, scraping real, IA, subida de fotografías, perfiles de marca independientes, invitaciones por email, recuperación de contraseña, suscripciones y límites comerciales. Un contenido planificado no se publica en redes. La identidad visual heredada sigue siendo de Ruano: este piloto sirve para verificar usuarios y datos, no para ofrecer todavía branding completo a otras agencias.
+Integración con n8n, scraping real, IA, subida de fotografías, invitaciones por email, recuperación de contraseña, suscripciones y límites comerciales. Un contenido planificado no se publica en redes.
 
 Los datos antiguos en localStorage se conservan en el navegador pero no se importan automáticamente a ninguna empresa. Antes de migrar, exportarlos, confirmar su propietario y preparar una importación validada.
 
@@ -70,7 +73,7 @@ npm run check y npm test. Las pruebas usan PostgreSQL embebido PGlite y un DOM s
 
 En el entorno aislado: crear dos empresas y usuarios, abrir sesiones separadas, crear contenido, recargar, cambiar empresa, manipular el ID de empresa en llamadas API y comprobar denegación. Probar también un usuario viewer, dos ediciones concurrentes, logout y revocación de membresía. Construir y comprobar la imagen Docker; no se ha construido en el entorno de desarrollo por ausencia de Docker.
 
-El limitador de login en memoria permite 10 intentos por email y 100 por dirección de conexión cada 15 minutos. Detrás de Traefik esta dirección puede ser la del proxy: añadir límites en el proxy con configuración de cabeceras confiables, sin aceptar X-Forwarded-For arbitrario. Con varias réplicas se requiere un limitador compartido. CSP conserva unsafe-inline para la interfaz heredada; una fase posterior debe extraer los scripts y endurecer esa política.
+El limitador de login en memoria permite 10 intentos por email y 100 por dirección de conexión cada 15 minutos. Detrás de Traefik esta dirección puede ser la del proxy: añadir límites en el proxy con configuración de cabeceras confiables, sin aceptar X-Forwarded-For arbitrario. Con varias réplicas se requiere un limitador compartido. CSP permite scripts exclusivamente del propio origen; los estilos aún permiten unsafe-inline por la interfaz heredada.
 
 ## Copias y rollback
 

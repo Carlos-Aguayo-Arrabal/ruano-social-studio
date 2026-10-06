@@ -63,7 +63,9 @@ test('password hashes and limiter reject invalid credentials and bursts',async()
   assert.equal(response.headers.get('location'),'/login?error=1');
 });
 test('anonymous API access fails and malformed session cannot crash the server',async()=>{
-  assert.equal((await fetch(origin+'/api/me')).status,401);
+  const anonymous=await fetch(origin+'/api/me');assert.equal(anonymous.status,401);
+  assert.match(anonymous.headers.get('content-security-policy'),/script-src 'self';/);
+  assert.doesNotMatch(anonymous.headers.get('content-security-policy'),/script-src[^;]*unsafe-inline/);
   assert.equal((await fetch(origin+'/api/me',{headers:{Cookie:'rss_session=%malformed'}})).status,401);
 });
 test('membership filters organizations and rejects cross-tenant reads/writes',async()=>{
@@ -95,6 +97,26 @@ test('property export downloads saved text only for members of the owning organi
  assert.equal((await fetch(path,{headers:{Cookie:cookieB}})).status,404);
  assert.equal((await fetch(path)).status,401);
  assert.equal((await fetch(path,{headers:{Cookie:cookieViewer}})).status,200);
+});
+test('brand settings remain tenant-owned; editors cannot replace or erase them',async()=>{
+ const brand={name:'Marca B',tagline:'Lema',phone:'',website:'https://example.test',color:'#123456',logo:''};
+ assert.equal((await state(orgB,cookieB,'PUT',{version:0,data:{...empty,brand}})).status,403);
+ await db.exec('RESET ROLE');await db.query("UPDATE rss_states SET data=$1::jsonb WHERE organization_id=$2",[JSON.stringify({...empty,brand}),orgB]);await db.exec('SET ROLE rss_app');
+ assert.equal((await state(orgB,cookieB,'PUT',{version:0,data:empty})).status,403);
+ assert.equal((await state(orgB,cookieB,'PUT',{version:0,data:{...empty,brand}})).status,200);
+ const current=await (await state(orgA,cookieA)).json();
+ assert.equal((await state(orgA,cookieA,'PUT',{version:current.version,data:{...current.data,brand}})).status,200);
+ assert.equal((await (await state(orgA,cookieA)).json()).data.brand.name,'Marca B');
+ assert.equal((await state(orgA,cookieB)).status,404);
+});
+test('invalid branding, dangling property selection, empty approvals and past schedules are rejected',async()=>{
+ for(const brand of [{logo:'data:image/svg+xml;base64,PHN2Zz4='},{color:'red'},{website:'javascript:alert(1)'},{logo:'data:image/png;base64,aGVsbG8='}])assert.throws(()=>validateState({version:0,data:{...empty,brand}}));
+ assert.throws(()=>validateState({version:0,data:{...empty,selectedPropertyId:999}}));
+ const current=await (await state(orgA,cookieA)).json();
+ const item={id:8001,title:'Test',type:'Publicación',channel:'Instagram',status:'approved',date:'2000-01-01',caption:'',icon:'⌂'};
+ assert.equal((await state(orgA,cookieA,'PUT',{version:current.version,data:{...current.data,content:[item]}})).status,400);
+ item.status='scheduled';item.caption='Texto confirmado';
+ assert.equal((await state(orgA,cookieA,'PUT',{version:current.version,data:{...current.data,content:[item]}})).status,400);
 });
 test('membership revocation and logout revoke existing sessions',async()=>{
   await db.exec('RESET ROLE');

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { database, withOrganization } from './db.mjs';
 import { newToken, tokenHash, sessionToken, verifyPassword, hashPassword, requireSameOrigin, LoginLimiter } from './security.mjs';
-import { validateState } from './state.mjs';
+import { validateState, validateBrand } from './state.mjs';
 import { loginPage } from './login.mjs';
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
@@ -20,7 +20,7 @@ export async function createApp({ pool, origin, production = false }) {
       'Content-Type':type, 'X-Content-Type-Options':'nosniff', 'X-Frame-Options':'DENY',
       'Referrer-Policy':'same-origin', 'Cache-Control':'no-store',
       'Permissions-Policy':'camera=(), microphone=(), geolocation=()',
-      'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       ...extra,
     });
     res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -105,6 +105,19 @@ export async function createApp({ pool, origin, production = false }) {
         const result = await withOrganization(pool,user.id,route[1],async (client,role) => {
           if (input && role === 'viewer') { const e = new Error('Solo lectura'); e.status = 403; throw e; }
           if (input) {
+            const {rows} = await client.query('SELECT data FROM rss_states WHERE organization_id=$1 FOR UPDATE',[route[1]]);
+            if (role !== 'owner') {
+              if (JSON.stringify(validateBrand(rows[0]?.data.brand)) !== JSON.stringify(validateBrand(input.data.brand))) {
+                const e=new Error('Solo el propietario puede modificar la marca'); e.status=403; throw e;
+              }
+            }
+            for (const item of input.data.content) {
+              if (item.status !== 'pending' && !item.caption.trim()) { const e=new Error('Completa el texto antes de aprobar');e.status=400;throw e; }
+              const before=rows[0]?.data.content.find(x=>x.id===item.id);
+              if (item.status === 'scheduled' && (!before || before.status !== 'scheduled' || before.date !== item.date) && item.date < new Date().toISOString().slice(0,10)) {
+                const e=new Error('No se puede programar en el pasado');e.status=400;throw e;
+              }
+            }
             const updated = await client.query(`UPDATE rss_states SET data=$1::jsonb,version=version+1,updated_at=now()
               WHERE organization_id=$2 AND version=$3 RETURNING version,data`,[JSON.stringify(input.data),route[1],input.version]);
             if (!updated.rows.length) { const e = new Error('Otro usuario ha actualizado los datos. Recarga antes de guardar.'); e.status = 409; throw e; }
