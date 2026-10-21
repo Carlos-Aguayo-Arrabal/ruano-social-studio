@@ -52,7 +52,7 @@
 
       <section class="view active" id="dashboard">
         <div class="hero-row">
-          <div><p class="eyebrow">JUEVES, 16 DE JULIO</p><h1>Buenas tardes, Carlos</h1><p>Organiza, crea y aprueba el contenido de Ruano desde un solo lugar.</p></div>
+          <div><p class="eyebrow" id="todayLabel"></p><h1 id="greeting">Hola, Carlos</h1><p>Organiza, crea y aprueba el contenido de Ruano desde un solo lugar.</p></div>
           <button class="primary-button" data-open-composer><span>＋</span> Crear contenido</button>
         </div>
         <article class="panel url-importer start-importer">
@@ -74,9 +74,9 @@
           </article>
           <aside class="right-column">
             <article class="panel week-panel">
-              <div class="panel-head"><div><h2>Esta semana</h2><p>13 – 19 de julio</p></div><button class="icon-button" data-action="week-calendar" title="Abrir calendario">•••</button></div>
+              <div class="panel-head"><div><h2>Esta semana</h2><p id="weekRange"></p></div><button class="icon-button" data-action="week-calendar" title="Abrir calendario">•••</button></div>
               <div class="week-days" id="weekDays"></div>
-              <div class="next-post"><div class="date-chip"><strong>17</strong><span>JUL</span></div><div><span class="platform-tag instagram">Instagram</span><strong>Chalet con piscina en Retamar</strong><small>Publicación · 19:30</small></div></div>
+              <div class="next-post" id="nextPost"></div>
             </article>
             <article class="idea-card"><div><span class="spark">✦</span><h3>¿Necesitas inspiración?</h3><p>Genera ideas adaptadas al mercado inmobiliario de Almería.</p><button class="light-button" data-open-ideas>Generar ideas con IA</button></div><div class="idea-shape">⌂</div></article>
           </aside>
@@ -157,7 +157,7 @@
  {id:8,title:'Oasis Santa Ana',type:'Reel',channel:'Instagram + Facebook',status:'scheduled',date:'2026-07-29',caption:'Nueva promoción residencial en el corazón de Almería.',icon:'◇'}
 ];
 let content=JSON.parse(localStorage.getItem('ruanoContent')||'null')||seedContent;
-let currentFilter='all'; let calendarDate=new Date(2026,6,1);
+let currentFilter='all'; let calendarDate=new Date(new Date().getFullYear(),new Date().getMonth(),1);
 const labels={pending:'PENDIENTE',approved:'APROBADO',scheduled:'PROGRAMADO',published:'PUBLICADO'};
 const save=()=>localStorage.setItem('ruanoContent',JSON.stringify(content));
 function channelClass(channel){return channel.includes('+')?'both':channel.toLowerCase()}
@@ -173,14 +173,22 @@ function renderContent(){
 }
 function updateCounts(){['pending','approved','scheduled','published'].forEach(s=>{const el=document.querySelector(`#${s}Count`);if(el)el.textContent=content.filter(x=>x.status===s).length})}
 function formatDate(d){return new Intl.DateTimeFormat('es-ES',{day:'numeric',month:'short'}).format(new Date(d+'T12:00:00'))}
-function renderWeek(){const days=['L','M','X','J','V','S','D'];document.querySelector('#weekDays').innerHTML=days.map((d,i)=>`<div class="day ${i===3?'today':''}"><span>${d}</span><strong>${13+i}</strong>${[1,3,4].includes(i)?'<i></i>':''}</div>`).join('')}
+function isoDate(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function fmt(d,o){return new Intl.DateTimeFormat('es-ES',o).format(d)}
+function renderToday(){const now=new Date(),h=now.getHours();document.querySelector('#todayLabel').textContent=fmt(now,{weekday:'long',day:'numeric',month:'long'}).toUpperCase();document.querySelector('#greeting').textContent=`${h>=6&&h<14?'Buenos días':h>=14&&h<21?'Buenas tardes':'Buenas noches'}, Carlos`}
+function renderWeek(){const days=['L','M','X','J','V','S','D'],now=new Date(),monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()-(now.getDay()+6)%7),week=days.map((_,i)=>new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+i)),sun=week[6],today=isoDate(now),busy=new Set(content.map(x=>x.date));
+ document.querySelector('#weekRange').textContent=monday.getMonth()===sun.getMonth()?`${monday.getDate()} – ${sun.getDate()} de ${fmt(sun,{month:'long'})}`:`${fmt(monday,{day:'numeric',month:'short'})} – ${fmt(sun,{day:'numeric',month:'short'})}`;
+ document.querySelector('#weekDays').innerHTML=week.map((d,i)=>`<div class="day ${isoDate(d)===today?'today':''}"><span>${days[i]}</span><strong>${d.getDate()}</strong>${busy.has(isoDate(d))?'<i></i>':''}</div>`).join('');
+ const next=content.filter(x=>x.date>=today&&x.status!=='published').sort((a,b)=>a.date.localeCompare(b.date))[0],box=document.querySelector('#nextPost');
+ if(!next){box.innerHTML='<div><strong>Sin publicaciones próximas</strong><small>Crea contenido para llenar el calendario.</small></div>';return}
+ const d=new Date(next.date+'T12:00:00');box.innerHTML=`<div class="date-chip"><strong>${d.getDate()}</strong><span>${fmt(d,{month:'short'}).replace('.','').toUpperCase()}</span></div><div><span class="platform-tag ${channelClass(next.channel)}">${platformName(next.channel)}</span><strong>${next.title}</strong><small>${next.type}</small></div>`}
 function renderCalendar(){
  const y=calendarDate.getFullYear(),m=calendarDate.getMonth();document.querySelector('#monthTitle').textContent=new Intl.DateTimeFormat('es-ES',{month:'long',year:'numeric'}).format(calendarDate);
  let first=(new Date(y,m,1).getDay()+6)%7,days=new Date(y,m+1,0).getDate(),prevDays=new Date(y,m,0).getDate(),cells=[];
  for(let i=0;i<42;i++){let num,muted=false,date;if(i<first){num=prevDays-first+i+1;muted=true;date=new Date(y,m-1,num)}else if(i>=first+days){num=i-first-days+1;muted=true;date=new Date(y,m+1,num)}else{num=i-first+1;date=new Date(y,m,num)}const iso=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');const events=content.filter(x=>x.date===iso);cells.push(`<div class="calendar-day ${muted?'muted':''}">${num}${events.map(e=>`<span class="calendar-event">${e.title}</span>`).join('')}</div>`)}document.querySelector('#calendarGrid').innerHTML=cells.join('');
 }
 function approve(id){const item=content.find(x=>x.id===Number(id));if(item){item.status='approved';save();renderAll();showToast(`“${item.title}” ha sido aprobado`)}}
-function renderAll(){renderReviews();renderContent();updateCounts();renderCalendar()}
+function renderAll(){renderToday();renderWeek();renderReviews();renderContent();updateCounts();renderCalendar()}
 function showToast(msg){const t=document.querySelector('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)}
 function showView(id){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===id));document.querySelectorAll('.nav-item[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===id));document.querySelector('.sidebar').classList.remove('open');if(id==='content')renderContent();if(id==='calendar')renderCalendar()}
 function editContent(id){const item=content.find(x=>x.id===Number(id));if(!item)return;const form=document.querySelector('#composerForm');form.elements.title.value=item.title;form.elements.type.value=item.type;form.elements.channel.value=item.channel;form.elements.date.value=item.date;form.dataset.editId=item.id;document.querySelector('.composer h2').textContent='Editar contenido';document.querySelector('#composerModal').classList.add('open')}
@@ -228,7 +236,7 @@ document.querySelector('#searchInput').addEventListener('input',renderContent);
 document.querySelector('#prevMonth').onclick=()=>{calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()-1,1);renderCalendar()};
 document.querySelector('#nextMonth').onclick=()=>{calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()+1,1);renderCalendar()};
 document.querySelector('#composerForm').addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target),title=f.get('title'),editId=Number(e.target.dataset.editId);if(editId){const item=content.find(x=>x.id===editId);Object.assign(item,{title,type:f.get('type'),channel:f.get('channel'),date:f.get('date')});delete e.target.dataset.editId}else content.unshift({id:Date.now(),title,type:f.get('type'),channel:f.get('channel'),status:'pending',date:f.get('date'),caption:`Borrador generado para ${f.get('goal').toLowerCase()}. Revisa el texto, las imágenes y la llamada a la acción antes de aprobarlo.`,icon:f.get('type')==='Reel'?'▶':f.get('type')==='Historia'?'◉':f.get('type')==='Carrusel'?'≡':'⌂'});save();renderAll();e.target.reset();document.querySelector('.composer h2').textContent='Crear publicación';document.querySelector('#composerModal').classList.remove('open');showView('content');showToast(editId?`“${title}” actualizado`:`Borrador “${title}” creado para revisión`)});
-renderWeek();renderAll();renderCompanies();renderProperties();updateWorkflow();
+renderAll();renderCompanies();renderProperties();updateWorkflow();
 
 // Editor de encabezado y pie corporativo
 const photoCanvas=document.querySelector('#photoCanvas'),photoCtx=photoCanvas.getContext('2d');
