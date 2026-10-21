@@ -141,43 +141,144 @@ async function askClaude(userText, schema) {
   return JSON.parse(text);
 }
 
+// ===== IA gratuita: Ollama en el propio VPS =====
+// Se usa si no hay ANTHROPIC_API_KEY. Servicio "ollama" del proyecto emprendeia en Easypanel.
+const OLLAMA_URL = (process.env.OLLAMA_URL || 'http://emprendeia_ollama:11434').replace(/\/$/, '');
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b';
+const ollama = { reachable: false, hasModel: false, pulling: false, error: '' };
+
+async function checkOllama() {
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) });
+    const d = await r.json();
+    ollama.reachable = true;
+    ollama.hasModel = (d.models || []).some(m => m.name === OLLAMA_MODEL || m.model === OLLAMA_MODEL);
+    ollama.error = '';
+    if (!ollama.hasModel && !ollama.pulling) pullOllamaModel();
+  } catch (err) {
+    ollama.reachable = false;
+    ollama.error = err.message;
+  }
+}
+
+// Descarga el modelo la primera vez (unos 2 GB); se guarda en el volumen de Ollama
+async function pullOllamaModel() {
+  ollama.pulling = true;
+  console.log(`Descargando el modelo ${OLLAMA_MODEL} en Ollama…`);
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/pull`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: OLLAMA_MODEL, stream: false }), signal: AbortSignal.timeout(60 * 60_000),
+    });
+    console.log('Descarga del modelo:', r.status, (await r.text()).slice(0, 200));
+  } catch (err) {
+    console.error('No se pudo descargar el modelo:', err.message);
+  } finally {
+    ollama.pulling = false;
+    checkOllama();
+  }
+}
+if (!anthropic) { checkOllama(); setInterval(checkOllama, 60_000).unref(); }
+
+// Instrucciones más cortas para un modelo pequeño que corre en CPU
+const OLLAMA_SYSTEM = AI_SYSTEM
+  .replace('de 500 a 1100 caracteres', 'de 400 a 800 caracteres')
+  .replace('de 6 a 9 líneas numeradas', 'de 5 a 7 líneas numeradas');
+
+async function askOllama(userText, schema) {
+  const r = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL, stream: false, format: schema, keep_alive: '15m',
+      options: { temperature: 0.6, num_ctx: 4096 },
+      messages: [{ role: 'system', content: OLLAMA_SYSTEM }, { role: 'user', content: userText }],
+    }),
+    signal: AbortSignal.timeout(10 * 60_000),
+  });
+  if (!r.ok) throw Object.assign(new Error('La IA del servidor ha devuelto un error. Inténtalo de nuevo.'), { status: 502 });
+  const d = await r.json();
+  return JSON.parse(d.message?.content || '{}');
+}
+
+const aiProvider = () => (anthropic ? 'claude' : ollama.reachable && ollama.hasModel ? 'ollama' : null);
+
+async function generateAi(userText, schema) {
+  const provider = aiProvider();
+  if (provider === 'ollama') {
+    try { return await askOllama(userText, schema); }
+    catch (err) {
+      if (err.status) throw err;
+      if (err.name === 'TimeoutError') throw Object.assign(new Error('La IA del servidor ha tardado demasiado. Inténtalo con menos textos.'), { status: 504 });
+      if (err instanceof SyntaxError) throw Object.assign(new Error('La IA del servidor ha devuelto un texto incompleto. Inténtalo de nuevo.'), { status: 502 });
+      throw Object.assign(new Error('No se pudo conectar con la IA del servidor (Ollama).'), { status: 502 });
+    }
+  }
+  if (provider === 'claude') {
+    try { return await askClaude(userText, schema); }
+    catch (err) {
+      if (err instanceof Anthropic.AuthenticationError) throw Object.assign(new Error('La clave de Claude no es válida. Revísala en Easypanel.'), { status: 503 });
+      if (err instanceof Anthropic.RateLimitError) throw Object.assign(new Error('Claude está saturado ahora mismo. Inténtalo en un minuto.'), { status: 429 });
+      if (err instanceof Anthropic.APIConnectionError) throw Object.assign(new Error('No se pudo conectar con Claude. Inténtalo de nuevo.'), { status: 502 });
+      if (err instanceof Anthropic.APIError) { console.error('Claude', err.status, err.message); throw Object.assign(new Error('Claude ha devuelto un error. Inténtalo de nuevo.'), { status: 502 }); }
+      throw err;
+    }
+  }
+  throw Object.assign(new Error('La IA no está disponible ahora mismo.'), { status: 503 });
+}
+
+// Trabajos en cola, de uno en uno (el VPS no tiene tarjeta gráfica): el navegador consulta el estado
+const aiJobs = new Map();
+let aiQueue = Promise.resolve();
+function startAiJob(run) {
+  const id = crypto.randomBytes(9).toString('hex');
+  const job = { status: 'queued', created: Date.now() };
+  aiJobs.set(id, job);
+  for (const [k, j] of aiJobs) if (Date.now() - j.created > 3600_000) aiJobs.delete(k);
+  aiQueue = aiQueue.then(async () => {
+    job.status = 'running'; job.started = Date.now();
+    try { job.result = await run(); job.status = 'done'; }
+    catch (err) { job.status = 'error'; job.error = err.status ? err.message : 'No se pudo redactar con la IA.'; if (!err.status) console.error('IA', err); }
+  });
+  return id;
+}
+
 async function handleAi(req, res, url) {
-  if (url.pathname === '/api/ai/status') return sendJson(res, 200, { enabled: Boolean(anthropic), model: AI_MODEL });
+  if (url.pathname === '/api/ai/status') {
+    const provider = aiProvider();
+    return sendJson(res, 200, {
+      enabled: Boolean(provider), provider, model: provider === 'claude' ? AI_MODEL : provider === 'ollama' ? OLLAMA_MODEL : null,
+      preparing: !anthropic && ollama.pulling, reachable: anthropic ? true : ollama.reachable,
+    });
+  }
+  const jm = url.pathname.match(/^\/api\/ai\/jobs\/([a-f0-9]{18})$/);
+  if (jm) {
+    const job = aiJobs.get(jm[1]);
+    if (!job) return sendJson(res, 404, { error: 'Trabajo no encontrado' });
+    const ahead = job.status === 'queued' ? [...aiJobs.values()].filter(j => j.status !== 'done' && j.status !== 'error' && j.created < job.created).length : 0;
+    return sendJson(res, 200, { status: job.status, result: job.result, error: job.error, ahead });
+  }
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Método no permitido' });
-  if (!anthropic) return sendJson(res, 503, { error: 'La IA no está activada: falta ANTHROPIC_API_KEY en Easypanel.' });
+  if (!aiProvider()) return sendJson(res, 503, { error: !anthropic && ollama.pulling ? 'La IA se está preparando (descargando el modelo). Inténtalo en unos minutos.' : 'La IA no está disponible ahora mismo.' });
   if (!aiAllowed()) return sendJson(res, 429, { error: 'Has llegado al límite de textos con IA de esta hora. Inténtalo más tarde.' });
   const body = JSON.parse((await readRaw(req, 64 * 1024)).toString('utf8'));
   const tone = TONES[body.tone] || TONES.cercano;
   const contact = clip(body.contact, 120) || 'pisosenalmeria.es';
-  try {
-    if (url.pathname === '/api/ai/captions') {
-      const keys = (Array.isArray(body.types) ? body.types : []).filter(k => CAPTION_KEYS.includes(k));
-      if (!keys.length) return sendJson(res, 400, { error: 'No se ha pedido ningún texto' });
-      const brief = CAMPAIGN_BRIEF[body.campaign] || CAMPAIGN_BRIEF.nuevo;
-      const extra = body.campaign === 'puertas' && body.openHouse ? `\nFecha y hora de la jornada: ${clip(body.openHouse, 80)}` : '';
-      const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
-      const out = await askClaude(
-        `Campaña: ${brief}${extra}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`,
-        schema,
-      );
-      return sendJson(res, 200, { texts: out, model: AI_MODEL });
-    }
-    if (url.pathname === '/api/ai/rewrite') {
-      const kind = CAPTION_KEYS.includes(body.kind) ? body.kind : 'publicacion';
-      const out = await askClaude(
-        `Mejora este texto de tipo "${kind}" manteniendo los datos y el formato indicado para ese tipo.\nTono: ${tone}\nContacto para el cierre: ${contact}\n${clip(body.instructions, 300) ? `Indicaciones: ${clip(body.instructions, 300)}\n` : ''}\nTexto actual:\n${clip(body.text, 4000)}\n\nFicha del inmueble:\n${propertySheet(body.property)}`,
-        { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: false },
-      );
-      return sendJson(res, 200, { text: out.texto, model: AI_MODEL });
-    }
-    return sendJson(res, 404, { error: 'No encontrado' });
-  } catch (err) {
-    if (err instanceof Anthropic.AuthenticationError) return sendJson(res, 503, { error: 'La clave de Claude no es válida. Revísala en Easypanel.' });
-    if (err instanceof Anthropic.RateLimitError) return sendJson(res, 429, { error: 'Claude está saturado ahora mismo. Inténtalo en un minuto.' });
-    if (err instanceof Anthropic.APIConnectionError) return sendJson(res, 502, { error: 'No se pudo conectar con Claude. Inténtalo de nuevo.' });
-    if (err instanceof Anthropic.APIError) { console.error('Claude', err.status, err.message); return sendJson(res, 502, { error: 'Claude ha devuelto un error. Inténtalo de nuevo.' }); }
-    throw err;
+  if (url.pathname === '/api/ai/captions') {
+    const keys = (Array.isArray(body.types) ? body.types : []).filter(k => CAPTION_KEYS.includes(k));
+    if (!keys.length) return sendJson(res, 400, { error: 'No se ha pedido ningún texto' });
+    const brief = CAMPAIGN_BRIEF[body.campaign] || CAMPAIGN_BRIEF.nuevo;
+    const extra = body.campaign === 'puertas' && body.openHouse ? `\nFecha y hora de la jornada: ${clip(body.openHouse, 80)}` : '';
+    const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
+    const prompt = `Campaña: ${brief}${extra}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
+    return sendJson(res, 202, { job: startAiJob(async () => ({ texts: await generateAi(prompt, schema) })) });
   }
+  if (url.pathname === '/api/ai/rewrite') {
+    const kind = CAPTION_KEYS.includes(body.kind) ? body.kind : 'publicacion';
+    const prompt = `Mejora este texto de tipo "${kind}" manteniendo los datos y el formato indicado para ese tipo.\nTono: ${tone}\nContacto para el cierre: ${contact}\n${clip(body.instructions, 300) ? `Indicaciones: ${clip(body.instructions, 300)}\n` : ''}\nTexto actual:\n${clip(body.text, 4000)}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
+    const schema = { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: false };
+    return sendJson(res, 202, { job: startAiJob(async () => ({ text: (await generateAi(prompt, schema)).texto })) });
+  }
+  return sendJson(res, 404, { error: 'No encontrado' });
 }
 
 const writeManifest = (ref, manifest) =>
