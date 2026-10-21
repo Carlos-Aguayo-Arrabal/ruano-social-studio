@@ -229,7 +229,19 @@ function ensureEssentials(texts, property = {}, campaign, contact) {
   return texts;
 }
 
+// El modelo pequeño responde mejor con un texto por petición: se piden uno a uno y se juntan
 async function askOllama(userText, schema) {
+  const keys = Object.keys(schema.properties || {});
+  if (keys.length <= 1) return askOllamaOne(userText, schema);
+  const out = {};
+  for (const k of keys) {
+    const one = { type: 'object', properties: { [k]: schema.properties[k] }, required: [k], additionalProperties: false };
+    Object.assign(out, await askOllamaOne(userText.replace(/Textos que necesito: [^\n]*/, `Texto que necesito ahora: ${k}`), one));
+  }
+  return out;
+}
+
+async function askOllamaOne(userText, schema) {
   const r = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -242,7 +254,13 @@ async function askOllama(userText, schema) {
   if (!r.ok) throw Object.assign(new Error('La IA del servidor ha devuelto un error. Inténtalo de nuevo.'), { status: 502 });
   const d = await r.json();
   const out = JSON.parse(d.message?.content || '{}');
-  for (const k of Object.keys(out)) out[k] = tidyText(out[k], k === 'texto' ? 'publicacion' : k);
+  for (const k of Object.keys(schema.properties || {})) {
+    if (typeof out[k] !== 'string' || out[k].trim().length < 20) {
+      console.error('Ollama: respuesta vacía o incompleta', k, d.done_reason, String(d.message?.content).slice(0, 200));
+      throw Object.assign(new Error('La IA del servidor ha devuelto un texto vacío. Inténtalo de nuevo.'), { status: 502 });
+    }
+    out[k] = tidyText(out[k], k === 'texto' ? 'publicacion' : k);
+  }
   return out;
 }
 
