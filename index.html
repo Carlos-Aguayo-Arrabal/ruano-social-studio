@@ -110,6 +110,7 @@
             <label>Formato<select id="photoFormat"><option value="3:4" selected>Publicación / carrusel · 3:4 (formato actual de Instagram)</option><option value="4:5">Publicación / carrusel · 4:5 (clásico)</option><option value="1:1">Publicación cuadrada · 1:1</option><option value="9:16">Historia / reel · 9:16</option></select></label>
             <div class="toggle-row"><div><strong>Encabezado</strong><small>Logo oficial sobre franja blanca</small></div><label class="switch"><input id="headerToggle" type="checkbox" checked><span></span></label></div>
             <div class="toggle-row"><div><strong>Pie corporativo</strong><small>Web, teléfono y referencia</small></div><label class="switch"><input id="footerToggle" type="checkbox" checked><span></span></label></div>
+            <div class="toggle-row"><div><strong>Portada de carrusel</strong><small>Título, datos y precio sobre la foto 1</small></div><label class="switch"><input id="coverToggle" type="checkbox" checked><span></span></label></div>
             <div class="adjust-block">
               <div class="toggle-row"><div><strong>Auto niveles</strong><small>Corrige contraste y color automáticamente</small></div><label class="switch"><input id="autoLevels" type="checkbox"><span></span></label></div>
               <label class="range-row"><span class="range-row-head">Brillo <b id="brightnessVal">0</b></span><input id="brightness" type="range" min="-50" max="50" value="0"></label>
@@ -468,6 +469,24 @@ function renderGallery(){
  document.querySelector('#downloadAllCount').textContent=photoState.images.length;
  document.querySelector('#downloadAllPhotos').disabled=photoState.images.length===0;document.querySelector('#makeReel').disabled=photoState.images.length<2;
 }
+// Portada de carrusel: operación y zona, título, datos, precio y "Desliza →" en la parte baja de la foto 1
+function drawCarouselCover(x,w,top,bottom){const info=reelInfo(true),pad=Math.round(w*.06),maxW=w-pad*2,k=w/1080;
+ x.save();x.textAlign='left';x.textBaseline='alphabetic';
+ x.font=`700 ${Math.round(66*k)}px 'Playfair Display',Georgia,serif`;let lines=reelWrap(x,info.title,maxW);
+ if(lines.length>3){lines=lines.slice(0,3);while(x.measureText(lines[2]+'…').width>maxW)lines[2]=lines[2].replace(/\s*\S+$/,'');lines[2]+='…'}
+ const lh=Math.round(76*k),pillH=Math.round(78*k);let y=bottom-Math.round(42*k);
+ const priceY=y;if(info.price)y-=pillH+Math.round(24*k);
+ const factsY=y;if(info.facts)y-=Math.round(64*k);
+ const titleY=y;y-=lines.length*lh+Math.round(4*k);const kickerY=y;
+ const g=x.createLinearGradient(0,Math.max(top,kickerY-Math.round(200*k)),0,bottom);g.addColorStop(0,'rgba(5,20,40,0)');g.addColorStop(.45,'rgba(5,20,40,.55)');g.addColorStop(1,'rgba(5,20,40,.85)');
+ x.fillStyle=g;x.fillRect(0,Math.max(top,kickerY-Math.round(200*k)),w,bottom-Math.max(top,kickerY-Math.round(200*k)));
+ x.fillStyle='#fff';x.font=`700 ${Math.round(30*k)}px 'DM Sans',Arial`;x.fillText((info.kicker||'').toUpperCase(),pad,kickerY);
+ x.font=`700 ${Math.round(66*k)}px 'Playfair Display',Georgia,serif`;lines.forEach((l,i)=>x.fillText(l,pad,titleY-(lines.length-1-i)*lh));
+ if(info.facts){x.font=`500 ${Math.round(36*k)}px 'DM Sans',Arial`;x.fillText(info.facts,pad,factsY-Math.round(6*k))}
+ const swipe='Desliza →';x.font=`600 ${Math.round(30*k)}px 'DM Sans',Arial`;const sw=x.measureText(swipe).width,sx=w-pad-sw-Math.round(44*k),sy=priceY-pillH;
+ x.fillStyle='rgba(255,255,255,.18)';reelRound(x,sx,sy+Math.round(10*k),sw+Math.round(44*k),pillH-Math.round(20*k),Math.round(29*k));x.fill();x.fillStyle='#fff';x.fillText(swipe,sx+Math.round(22*k),sy+pillH/2+Math.round(10*k));
+ if(info.price){x.font=`700 ${Math.round(48*k)}px 'DM Sans',Arial`;const pw=x.measureText(info.price).width;x.fillStyle='#0d447f';reelRound(x,pad,sy,pw+Math.round(56*k),pillH,Math.round(16*k));x.fill();x.fillStyle='#fff';x.fillText(info.price,pad+Math.round(28*k),sy+pillH/2+Math.round(17*k))}
+ x.restore()}
 function paintCanvas(img,adjust){
  adjust=adjust||defaultAdjust();
  const [w,h]=sizes[document.querySelector('#photoFormat').value];photoCanvas.width=w;photoCanvas.height=h;photoCtx.clearRect(0,0,w,h);
@@ -484,6 +503,7 @@ function paintCanvas(img,adjust){
   coverImage(photoCtx,source,0,headerH,w,photoH);
  }
  photoCtx.restore();
+ if(img===photoState.images[0]&&document.querySelector('#coverToggle').checked)drawCarouselCover(photoCtx,w,headerH,h-footerH);
  if(hasHeader){photoCtx.fillStyle='#fff';photoCtx.fillRect(0,0,w,headerH);const logo=document.querySelector('#officialLogo'),logoH=headerH*.76,logoW=logoH*(logo.naturalWidth/logo.naturalHeight);photoCtx.drawImage(logo,46,(headerH-logoH)/2,logoW,logoH);photoCtx.fillStyle='#0b315f';photoCtx.textAlign='right';photoCtx.font=`600 ${Math.round(headerH*.17)}px Arial`;photoCtx.fillText('TU HOGAR, NUESTRA PRIORIDAD',w-48,headerH*.47);photoCtx.font=`400 ${Math.round(headerH*.12)}px Arial`;photoCtx.fillStyle='#64758a';photoCtx.fillText('Inmobiliaria en Almería',w-48,headerH*.68)}
  if(hasFooter){const y=h-footerH;photoCtx.fillStyle='#0b315f';photoCtx.fillRect(0,y,w,footerH);photoCtx.fillStyle='#fff';photoCtx.textAlign='left';photoCtx.font=`600 ${Math.round(footerH*.18)}px Arial`;photoCtx.fillText(document.querySelector('#footerText').value||'pisosenalmeria.es',45,y+footerH*.58);const ref=document.querySelector('#photoReference').value.trim();if(ref){photoCtx.textAlign='right';photoCtx.fillText(ref.toUpperCase(),w-45,y+footerH*.58)}}
  return {w,h};
@@ -611,7 +631,7 @@ document.querySelector('#photoGallery').addEventListener('click',e=>{
  const select=e.target.closest('[data-select]');
  if(select){photoState.active=Number(select.dataset.select);renderGallery();syncAdjustUI();drawPhoto()}
 });
-['photoFormat','headerToggle','footerToggle','photoReference','footerText'].forEach(id=>document.querySelector('#'+id).addEventListener('input',scheduleDraw));
+['photoFormat','headerToggle','footerToggle','coverToggle','photoReference','footerText'].forEach(id=>document.querySelector('#'+id).addEventListener('input',scheduleDraw));
 document.querySelector('#autoLevels').addEventListener('change',e=>{const a=currentAdjust();if(!a)return;a.levels=e.target.checked;drawPhoto();persistPhotos()});
 ['brightness','contrast','saturation'].forEach(id=>document.querySelector('#'+id).addEventListener('input',e=>{const a=currentAdjust();if(!a)return;a[id]=Number(e.target.value);persistPhotos();document.querySelector('#'+id+'Val').textContent=e.target.value;scheduleDraw()}));
 document.querySelector('#rotate').addEventListener('input',e=>{const a=currentAdjust();if(!a)return;a.rotate=Number(e.target.value);persistPhotos();document.querySelector('#rotateVal').textContent=formatDeg(e.target.value);scheduleDraw()});
@@ -620,6 +640,7 @@ document.querySelector('#resetPhoto').addEventListener('click',()=>{if(photoStat
 document.querySelector('#downloadPhoto').addEventListener('click',()=>{if(!photoState.images[photoState.active])return;drawPhoto();const a=document.createElement('a');a.download=`ruano-${document.querySelector('#photoReference').value.trim().toLowerCase().replace(/\s+/g,'-')||'publicacion'}.jpg`;a.href=photoCanvas.toDataURL('image/jpeg',JPG_QUALITY);a.click();showToast('Imagen preparada en JPG')});
 document.querySelector('#downloadAllPhotos').addEventListener('click',async()=>{
  if(!photoState.images.length)return;
+ if(photoState.images.length>20)showToast('Instagram admite hasta 20 fotos por carrusel: usa las 20 primeras');
  const btn=document.querySelector('#downloadAllPhotos'),original=btn.textContent;btn.disabled=true;
  const ref=document.querySelector('#photoReference').value.trim().toLowerCase().replace(/\s+/g,'-')||'publicacion',multiple=photoState.images.length>1;
  for(let i=0;i<photoState.images.length;i++){
