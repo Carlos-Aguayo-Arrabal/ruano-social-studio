@@ -600,49 +600,69 @@ document.querySelector('#photoInput').addEventListener('change',async e=>{
 // ===== Reel automático 9:16 (1080x1920) grabado en el navegador con MediaRecorder =====
 const REEL_W=1080,REEL_H=1920,REEL_FPS=30,REEL_FADE=.5,REEL_OUTRO=3;
 function reelMime(){return['video/mp4;codecs=avc1.640028','video/mp4;codecs=avc1.4d002a','video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm'].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t))||''}
-// Cada foto se prepara una vez a 1080x1920 con sus ajustes; luego cada fotograma solo la desplaza y amplía
-function reelPlate(img,adjust){const c=document.createElement('canvas');c.width=REEL_W;c.height=REEL_H;const x=c.getContext('2d'),a=adjust||defaultAdjust(),src=a.levels?getLeveledSource(img):img;
- x.fillStyle='#000';x.fillRect(0,0,REEL_W,REEL_H);x.filter=`brightness(${1+a.brightness/100}) contrast(${1+a.contrast/100}) saturate(${1+a.saturation/100})`;
- if(a.rotate){const k=1.5;x.translate(REEL_W/2,REEL_H/2);x.rotate(a.rotate*Math.PI/180);x.translate(-REEL_W/2,-REEL_H/2);coverImage(x,src,REEL_W*(1-k)/2,REEL_H*(1-k)/2,REEL_W*k,REEL_H*k)}else coverImage(x,src,0,0,REEL_W,REEL_H);return c}
+// Fotos horizontales: la cámara recorre la foto de lado a lado para enseñar la estancia entera.
+// Fotos verticales o enderezadas: se rellenan a 1080x1920 con zoom suave (Ken Burns).
+function reelPlate(img,adjust){const a=adjust||defaultAdjust(),src=a.levels?getLeveledSource(img):img,iw=src.width,ih=src.height,
+ filt=`brightness(${1+a.brightness/100}) contrast(${1+a.contrast/100}) saturate(${1+a.saturation/100})`,plain=!a.brightness&&!a.contrast&&!a.saturation;
+ if(!a.rotate&&iw/ih>1.15){if(plain)return{mode:'pan',src,w:iw,h:ih};const c=document.createElement('canvas');c.width=iw;c.height=ih;const x=c.getContext('2d');x.filter=filt;x.drawImage(src,0,0);return{mode:'pan',src:c,w:iw,h:ih}}
+ const c=document.createElement('canvas');c.width=REEL_W;c.height=REEL_H;const x=c.getContext('2d');x.fillStyle='#000';x.fillRect(0,0,REEL_W,REEL_H);x.filter=filt;
+ if(a.rotate){const k=1.5;x.translate(REEL_W/2,REEL_H/2);x.rotate(a.rotate*Math.PI/180);x.translate(-REEL_W/2,-REEL_H/2);coverImage(x,src,REEL_W*(1-k)/2,REEL_H*(1-k)/2,REEL_W*k,REEL_H*k)}else coverImage(x,src,0,0,REEL_W,REEL_H);
+ return{mode:'cover',src:c,w:REEL_W,h:REEL_H}}
 function reelWrap(x,text,maxW){const words=String(text).split(/\s+/),lines=[];let line='';for(const w of words){const t=line?line+' '+w:w;if(x.measureText(t).width>maxW&&line){lines.push(line);line=w}else line=t}if(line)lines.push(line);return lines}
 function reelRound(x,X,Y,W,H,r){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+W,Y,X+W,Y+H,r);x.arcTo(X+W,Y+H,X,Y+H,r);x.arcTo(X,Y+H,X,Y,r);x.arcTo(X,Y,X+W,Y,r);x.closePath()}
 const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2,clamp01=v=>Math.max(0,Math.min(1,v));
-function drawKenBurns(x,plate,i,p,alpha){const zIn=i%2===0,z=zIn?1+.09*p:1.09-.09*p,dir=i%4<2?1:-1,dx=dir*(z-1)*REEL_W*.45*(p-.5),w=REEL_W*z,h=REEL_H*z;
- x.globalAlpha=alpha;x.drawImage(plate,(REEL_W-w)/2+dx,(REEL_H-h)/2,w,h);x.globalAlpha=1}
-// Zonas seguras de Instagram: evitar ~250 px arriba y ~650 px abajo (interfaz de la app)
-function drawReelFrame(x,t,r){const {plates,D,n,info}=r,total=n*D+REEL_OUTRO;x.clearRect(0,0,REEL_W,REEL_H);
- const photoEnd=n*D;
+function drawPlate(x,pl,i,p,alpha){x.globalAlpha=alpha;
+ if(pl.mode==='pan'){const z=1+.05*p,ch=pl.h/z,cw=Math.min(pl.w,ch*REEL_W/REEL_H),travel=pl.w-cw,from=travel*(i%2?.92:.08),to=travel*(i%2?.08:.92),sx=from+(to-from)*ease(clamp01(p)),sy=(pl.h-ch)/2;
+  x.drawImage(pl.src,sx,sy,cw,ch,0,0,REEL_W,REEL_H)}
+ else{const zIn=i%2===0,z=zIn?1+.09*p:1.09-.09*p,dir=i%4<2?1:-1,dx=dir*(z-1)*REEL_W*.45*(p-.5),w=REEL_W*z,h=REEL_H*z;x.drawImage(pl.src,(REEL_W-w)/2+dx,(REEL_H-h)/2,w,h)}
+ x.globalAlpha=1}
+// Fondo del cierre: la primera foto desenfocada bajo el azul corporativo
+function reelOutroBg(pl){const c=document.createElement('canvas');c.width=REEL_W;c.height=REEL_H;const x=c.getContext('2d');drawPlate(x,pl,0,.5,1);
+ const sm=document.createElement('canvas');sm.width=108;sm.height=192;sm.getContext('2d').drawImage(c,0,0,108,192);x.clearRect(0,0,REEL_W,REEL_H);x.filter='blur(14px)';x.drawImage(sm,-60,-60,REEL_W+120,REEL_H+120);x.filter='none';
+ x.fillStyle='rgba(11,49,95,.82)';x.fillRect(0,0,REEL_W,REEL_H);return c}
+function splitContact(c){const m=String(c).match(/\+?\d[\d\s.]{7,}\d/),phone=m?m[0].replace(/\s+/g,' ').trim():'',web=String(c).replace(m?m[0]:'','').replace(/[·|,\s]+$/,'').replace(/^[·|,\s]+/,'').replace(/\s*·\s*$/,'').trim();return{phone,web}}
+// Zonas seguras de Instagram: nada importante en los ~250 px de arriba ni en los ~650 px de abajo
+function drawReelFrame(x,t,r){const {plates,D,n,info}=r,total=n*D+REEL_OUTRO,photoEnd=n*D;x.clearRect(0,0,REEL_W,REEL_H);
  if(t<photoEnd+REEL_FADE){const tt=Math.min(t,photoEnd-.001),i=Math.floor(tt/D),local=tt-i*D;
-  drawKenBurns(x,plates[i],i,local/D,1);
-  if(i<n-1&&local>D-REEL_FADE)drawKenBurns(x,plates[i+1],i+1,(local-(D-REEL_FADE))/D,ease((local-(D-REEL_FADE))/REEL_FADE));
-  // degradados para que el texto se lea
-  let g=x.createLinearGradient(0,0,0,520);g.addColorStop(0,'rgba(5,20,40,.55)');g.addColorStop(1,'rgba(5,20,40,0)');x.fillStyle=g;x.fillRect(0,0,REEL_W,520);
-  g=x.createLinearGradient(0,REEL_H*.36,0,REEL_H*.62);g.addColorStop(0,'rgba(5,20,40,0)');g.addColorStop(1,'rgba(5,20,40,.72)');x.fillStyle=g;x.fillRect(0,REEL_H*.36,REEL_W,REEL_H*.26);x.fillStyle='rgba(5,20,40,.72)';x.fillRect(0,REEL_H*.62,REEL_W,REEL_H*.38);
-  // logo
-  const logo=document.querySelector('#officialLogo');if(logo?.naturalWidth){const lh=104,lw=lh*logo.naturalWidth/logo.naturalHeight;x.fillStyle='rgba(255,255,255,.94)';reelRound(x,60,250,lw+44,lh+28,20);x.fill();x.drawImage(logo,82,264,lw,lh)}
-  // portada: título y precio (primer tramo)
+  drawPlate(x,plates[i],i,local/D,1);
+  if(i<n-1&&local>D-REEL_FADE){const q=(local-(D-REEL_FADE))/REEL_FADE;drawPlate(x,plates[i+1],i+1,q*REEL_FADE/D,ease(q))}
+  let g=x.createLinearGradient(0,0,0,480);g.addColorStop(0,'rgba(5,20,40,.5)');g.addColorStop(1,'rgba(5,20,40,0)');x.fillStyle=g;x.fillRect(0,0,REEL_W,480);
+  g=x.createLinearGradient(0,REEL_H*.55,0,REEL_H);g.addColorStop(0,'rgba(5,20,40,0)');g.addColorStop(1,'rgba(5,20,40,.5)');x.fillStyle=g;x.fillRect(0,REEL_H*.55,REEL_W,REEL_H*.45);
+  const logo=document.querySelector('#officialLogo');if(logo?.naturalWidth){const lh=120,lw=lh*logo.naturalWidth/logo.naturalHeight;x.fillStyle='rgba(255,255,255,.95)';reelRound(x,60,250,lw+40,lh+28,22);x.fill();x.drawImage(logo,80,264,lw,lh)}
+  // Portada: bloque de texto con fondo oscuro propio para que se lea sobre cualquier foto
   const introA=t<D?clamp01(t/.45)*(t>D-.45?clamp01((D-t)/.45):1):0;
-  if(introA>0){x.globalAlpha=introA;const up=(1-ease(clamp01(t/.6)))*40;
-   if(info.stamp){x.font="800 40px 'DM Sans',Arial";const tw=x.measureText(info.stamp).width;x.fillStyle=info.stampColor;reelRound(x,70,820+up,tw+52,74,14);x.fill();x.fillStyle='#fff';x.fillText(info.stamp,96,870+up)}
-   x.fillStyle='#fff';x.font="700 40px 'DM Sans',Arial";x.fillText((info.kicker||'').toUpperCase(),70,940+up);
-   x.font="700 76px 'Playfair Display',Georgia,serif";let lines=reelWrap(x,info.title,REEL_W-140);if(lines.length>3){lines=lines.slice(0,3);while(x.measureText(lines[2]+'…').width>REEL_W-140)lines[2]=lines[2].replace(/\s*\S+$/,'');lines[2]+='…'}lines.forEach((l,k)=>x.fillText(l,70,1035+k*88+up));
-   let y=1035+lines.length*88+10+up;if(info.facts){x.font="500 40px 'DM Sans',Arial";x.fillText(info.facts,70,y);y+=70}
-   if(info.price){x.font="700 54px 'DM Sans',Arial";const pw=x.measureText(info.price).width;x.fillStyle='#0d447f';reelRound(x,70,y-50,pw+56,82,16);x.fill();x.fillStyle='#fff';x.fillText(info.price,98,y+12);if(info.oldPrice){x.font="500 40px 'DM Sans',Arial";const ox=70+pw+86,ow=x.measureText(info.oldPrice).width;x.fillStyle='rgba(255,255,255,.85)';x.fillText(info.oldPrice,ox,y+8);x.fillRect(ox-2,y-6,ow+4,4)}}x.globalAlpha=1}
-  // etiqueta fija de la referencia (después de la portada)
-  const tagA=t>D-.2?clamp01((t-(D-.2))/.4):0;if(tagA>0){x.globalAlpha=tagA;x.font="700 38px 'DM Sans',Arial";const tag=info.tag,tw=x.measureText(tag).width;x.fillStyle='rgba(13,68,127,.92)';reelRound(x,70,1180,tw+52,72,36);x.fill();x.fillStyle='#fff';x.fillText(tag,96,1229);x.globalAlpha=1}}
- // cierre
- if(t>=photoEnd){const a=ease(clamp01((t-photoEnd)/REEL_FADE));x.globalAlpha=a;x.fillStyle='#0b315f';x.fillRect(0,0,REEL_W,REEL_H);
-  const logo=document.querySelector('#officialLogo'),up=(1-ease(clamp01((t-photoEnd)/.8)))*30;
-  if(logo?.naturalWidth){const lh=200,lw=lh*logo.naturalWidth/logo.naturalHeight;x.fillStyle='#fff';reelRound(x,(REEL_W-lw)/2-50,520+up,lw+100,lh+60,32);x.fill();x.drawImage(logo,(REEL_W-lw)/2,550+up,lw,lh)}
-  x.fillStyle='#fff';x.textAlign='center';x.font="700 78px 'Playfair Display',Georgia,serif";x.fillText('¿Te interesa?',REEL_W/2,960+up);
-  x.font="500 46px 'DM Sans',Arial";x.fillText('Solicita tu visita',REEL_W/2,1040+up);
-  x.font="700 44px 'DM Sans',Arial";x.fillStyle='#bcd6f2';x.fillText(info.tag,REEL_W/2,1140+up);
-  x.fillStyle='#fff';x.font="500 40px 'DM Sans',Arial";reelWrap(x,info.contact,REEL_W-160).slice(0,2).forEach((l,k)=>x.fillText(l,REEL_W/2,1215+k*56+up));
-  x.textAlign='left';x.globalAlpha=1}
+  if(introA>0){const up=(1-ease(clamp01(t/.6)))*40;x.font="700 76px 'Playfair Display',Georgia,serif";let lines=reelWrap(x,info.title,REEL_W-140);
+   if(lines.length>3){lines=lines.slice(0,3);while(x.measureText(lines[2]+'…').width>REEL_W-140)lines[2]=lines[2].replace(/\s*\S+$/,'');lines[2]+='…'}
+   const kickerY=info.stamp?790:740,titleY=kickerY+96,factsY=titleY+(lines.length-1)*88+66,priceY=factsY+(info.facts?84:16),bottomY=priceY+(info.price?52:0)+60,topY=kickerY-(info.stamp?170:90);
+   x.globalAlpha=introA;g=x.createLinearGradient(0,topY-160,0,topY);g.addColorStop(0,'rgba(5,20,40,0)');g.addColorStop(1,'rgba(5,20,40,.82)');x.fillStyle=g;x.fillRect(0,topY-160,REEL_W,160);
+   x.fillStyle='rgba(5,20,40,.82)';x.fillRect(0,topY,REEL_W,bottomY-topY);g=x.createLinearGradient(0,bottomY,0,bottomY+140);g.addColorStop(0,'rgba(5,20,40,.82)');g.addColorStop(1,'rgba(5,20,40,0)');x.fillStyle=g;x.fillRect(0,bottomY,REEL_W,140);
+   if(info.stamp){x.font="800 40px 'DM Sans',Arial";const tw=x.measureText(info.stamp).width;x.fillStyle=info.stampColor;reelRound(x,70,kickerY-122+up,tw+52,74,14);x.fill();x.fillStyle='#fff';x.fillText(info.stamp,96,kickerY-72+up)}
+   x.fillStyle='#fff';x.font="700 38px 'DM Sans',Arial";x.fillText((info.kicker||'').toUpperCase(),70,kickerY+up);
+   x.font="700 76px 'Playfair Display',Georgia,serif";lines.forEach((l,k)=>x.fillText(l,70,titleY+k*88+up));
+   if(info.facts){x.font="500 40px 'DM Sans',Arial";x.fillStyle='rgba(255,255,255,.92)';x.fillText(info.facts,70,factsY+up);x.fillStyle='#fff'}
+   if(info.price){x.font="700 54px 'DM Sans',Arial";const pw=x.measureText(info.price).width;x.fillStyle='#0d447f';reelRound(x,70,priceY-50+up,pw+56,82,16);x.fill();x.fillStyle='#fff';x.fillText(info.price,98,priceY+12+up);
+    if(info.oldPrice){x.font="500 40px 'DM Sans',Arial";const ox=70+pw+86,ow=x.measureText(info.oldPrice).width;x.fillStyle='rgba(255,255,255,.85)';x.fillText(info.oldPrice,ox,priceY+8+up);x.fillRect(ox-2,priceY-6+up,ow+4,4)}}
+   x.globalAlpha=1}
+  const tagA=t>D-.2?clamp01((t-(D-.2))/.4):0;if(tagA>0){x.globalAlpha=tagA;x.font="700 38px 'DM Sans',Arial";const tag=info.tag,tw=x.measureText(tag).width;x.fillStyle='rgba(13,68,127,.94)';reelRound(x,70,1150,tw+52,72,36);x.fill();x.fillStyle='#fff';x.fillText(tag,96,1199);x.globalAlpha=1}}
+ // Cierre: foto desenfocada, entrada escalonada y llamada a la acción con latido suave
+ if(t>=photoEnd){const ot=t-photoEnd,a=ease(clamp01(ot/REEL_FADE)),st=k=>ease(clamp01((ot-.2-k*.16)/.5)),{phone,web}=splitContact(info.contact);
+  x.globalAlpha=a;x.drawImage(r.outroBg,0,0);x.globalAlpha=1;x.textAlign='center';
+  const logo=document.querySelector('#officialLogo');if(logo?.naturalWidth){const e=st(0),lh=190,lw=lh*logo.naturalWidth/logo.naturalHeight;x.globalAlpha=e;x.fillStyle='#fff';reelRound(x,(REEL_W-lw)/2-46,300+(1-e)*30,lw+92,lh+56,34);x.fill();x.drawImage(logo,(REEL_W-lw)/2,328+(1-e)*30,lw,lh)}
+  let e=st(1);x.globalAlpha=e;x.fillStyle='#fff';x.font="700 88px 'Playfair Display',Georgia,serif";x.fillText('¿Te interesa?',REEL_W/2,680+(1-e)*30);
+  e=st(2);x.globalAlpha=e;x.fillStyle='#bcd6f2';x.font="700 44px 'DM Sans',Arial";x.fillText(info.tag,REEL_W/2,760+(1-e)*30);
+  e=st(3);x.globalAlpha=e;const pulse=1+.035*Math.sin(ot*Math.PI*2*1.1)*clamp01((ot-1)/.4);x.save();x.translate(REEL_W/2,868+(1-e)*30);x.scale(pulse,pulse);
+  x.font="800 50px 'DM Sans',Arial";const cta='Solicita tu visita',cw=x.measureText(cta).width+110;x.fillStyle='#fff';reelRound(x,-cw/2,-56,cw,112,56);x.fill();x.fillStyle='#0b315f';x.fillText(cta,0,17);x.restore();
+  e=st(4);x.globalAlpha=e;x.fillStyle='#fff';if(phone){x.font="500 38px 'DM Sans',Arial";x.fillText('Llámanos o escríbenos al',REEL_W/2,1005+(1-e)*30);x.font="800 76px 'DM Sans',Arial";x.fillText(phone,REEL_W/2,1090+(1-e)*30)}
+  e=st(5);x.globalAlpha=e;x.font="500 42px 'DM Sans',Arial";x.fillStyle='rgba(255,255,255,.9)';x.fillText(web||info.contact,REEL_W/2,(phone?1165:1040)+(1-e)*30);x.font="500 34px 'DM Sans',Arial";x.fillStyle='#bcd6f2';x.fillText('o por mensaje directo',REEL_W/2,(phone?1220:1095)+(1-e)*30);
+  x.globalAlpha=1;x.textAlign='left'}
  return total}
+// Títulos de WITEI en MAYÚSCULAS → formato normal, conservando los nombres de la zona; sin repetir "en venta/alquiler"
+function niceTitle(t,p){t=String(t||'').trim();const letters=t.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g,'');
+ if(letters&&letters.replace(/[^A-ZÁÉÍÓÚÜÑ]/g,'').length/letters.length>.7){const names=(p?.location||'').split(/[,\s]+/).filter(w=>w.length>2);t=t.toLowerCase().split(' ').map(w=>names.find(n=>n.toLowerCase()===w)||w).join(' ');t=t.charAt(0).toUpperCase()+t.slice(1)}
+ return t.replace(/\s+en\s+(venta|alquiler)\b/i,'').replace(/\s{2,}/g,' ')}
 function reelInfo(withPrice){const p=getActiveProperty(),ref=p?.reference||document.querySelector('#photoReference').value.replace(/^ref\.?\s*/i,'').trim();
  const closed=['reservado','vendido'].includes(p?.stamp),facts=p?[p.beds,p.built,p.baths].filter(Boolean).join(' · '):'',price=withPrice&&p?.price&&!closed?p.price:'',oldPrice=p?.stamp==='precio'&&price?p.oldPrice||'':'';
- return{title:p?.title||'Nueva vivienda en Almería',kicker:p?[p.operation==='Alquiler'?'En alquiler':'En venta',p.location].filter(Boolean).join(' · '):'Ruano Inmobiliaria',facts,price,
+ return{title:p?niceTitle(p.title,p):'Nueva vivienda en Almería',kicker:p?[p.operation==='Alquiler'?'En alquiler':'En venta',p.location].filter(Boolean).join(' · '):'Ruano Inmobiliaria',facts,price,
   tag:[ref&&`REF. ${ref}`,price].filter(Boolean).join(' · ')||'Ruano Inmobiliaria',contact:document.querySelector('#footerText').value.trim()||'pisosenalmeria.es',ref,oldPrice,stamp:stampLabel(p),stampColor:CAMPAIGNS[p?.stamp]?.color||'#0d447f'}}
 let reelBlob=null,reelUrl='',reelBusy=false;
 function openReel(){if(photoState.images.length<2){showToast('Sube al menos 2 fotos para crear el reel');return}
@@ -658,10 +678,21 @@ async function generateReel(){const mime=reelMime();if(!mime){showToast('Este na
  const c=document.createElement('canvas');c.width=REEL_W;c.height=REEL_H;screen.replaceChildren(c);const x=c.getContext('2d');
  try{await document.fonts?.ready;status.textContent='Preparando fotos…';const plates=[];
   for(let i=0;i<n;i++){plates.push(reelPlate(photoState.images[i],photoState.adjustments[i]));bar.style.width=`${(i+1)/n*15}%`;await new Promise(r=>setTimeout(r,0))}
-  const r={plates,D,n,info},total=n*D+REEL_OUTRO;drawReelFrame(x,0,r);
+  const r={plates,D,n,info,outroBg:reelOutroBg(plates[0])},total=n*D+REEL_OUTRO;drawReelFrame(x,0,r);
   const rec=new MediaRecorder(c.captureStream(REEL_FPS),{mimeType:mime,videoBitsPerSecond:8_000_000}),chunks=[];rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};const stopped=new Promise(res=>rec.onstop=res);
   rec.start(1000);const start=performance.now();status.textContent='Grabando el reel… no cambies de pestaña';
-  await new Promise(res=>{const tick=()=>{const t=(performance.now()-start)/1000;if(t>=total){drawReelFrame(x,total-.001,r);res();return}drawReelFrame(x,t,r);bar.style.width=`${15+t/total*85}%`;requestAnimationFrame(tick)};requestAnimationFrame(tick)});
+  // Si se cambia de pestaña, la grabación se pausa y sigue al volver (sin saltos en el vídeo).
+  // Cada fotograma se pide por animación y por temporizador, el que llegue antes, por si el navegador deja de pintar.
+  let pausedMs=0,pausedAt=0;
+  await new Promise(res=>{let finished=false;
+   const next=()=>{let fired=false;const run=()=>{if(fired)return;fired=true;tick()};requestAnimationFrame(run);setTimeout(run,40)};
+   const onVis=()=>{if(finished)return;if(document.hidden){if(rec.state==='recording'){rec.pause();pausedAt=performance.now();status.textContent='En pausa: vuelve a esta pestaña para continuar'}}
+    else if(rec.state==='paused'){pausedMs+=performance.now()-pausedAt;rec.resume();status.textContent='Grabando el reel… no cambies de pestaña';next()}};
+   document.addEventListener('visibilitychange',onVis);
+   const tick=()=>{if(finished||rec.state==='paused')return;const t=(performance.now()-start-pausedMs)/1000;
+    if(t>=total){drawReelFrame(x,total-.001,r);finished=true;document.removeEventListener('visibilitychange',onVis);res();return}
+    drawReelFrame(x,t,r);bar.style.width=`${15+t/total*85}%`;next()};
+   next()});
   await new Promise(res=>setTimeout(res,150));rec.stop();await stopped;
   reelBlob=new Blob(chunks,{type:mime.split(';')[0]});if(reelUrl)URL.revokeObjectURL(reelUrl);reelUrl=URL.createObjectURL(reelBlob);
   const v=document.createElement('video');v.src=reelUrl;v.controls=true;v.playsInline=true;v.muted=true;screen.replaceChildren(v);v.play().catch(()=>{});
