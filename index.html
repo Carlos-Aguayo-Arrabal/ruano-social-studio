@@ -273,8 +273,8 @@ function getLeveledSource(img){
 // Las fotos del móvil pueden tener 12–48 MP, pero la imagen final mide 1080 px de ancho.
 // Se trabaja con una copia reducida (máx. 3000 px por lado) y una miniatura para la galería.
 const WORK_MAX=3000,THUMB_MAX=240;
-// Para redes sociales: JPG al 85 %, unas 10 veces más ligero que PNG sin diferencia visible (Instagram lo recomprime igualmente)
-const JPG_QUALITY=.85;
+// Para redes sociales: JPG al 80 %, mucho más ligero que PNG sin diferencia visible (Instagram lo recomprime igualmente)
+const JPG_QUALITY=.8;
 async function decodeScaled(file,max){
  const probe=await createImageBitmap(file);const k=Math.min(1,max/Math.max(probe.width,probe.height));
  if(k===1)return probe;
