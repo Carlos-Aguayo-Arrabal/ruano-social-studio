@@ -2,6 +2,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import Anthropic from '@anthropic-ai/sdk';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -69,6 +70,116 @@ async function readManifest(ref) {
   }
 }
 
+// ===== Textos con Claude =====
+// La clave va en la variable de entorno ANTHROPIC_API_KEY (Easypanel → Entorno). Sin clave, la IA queda desactivada.
+const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic() : null;
+const AI_MODEL = 'claude-opus-5-5';
+const AI_MAX_PER_HOUR = 60;
+const aiCalls = [];
+
+const AI_SYSTEM = `Eres el redactor de redes sociales de Ruano Inmobiliaria, una agencia de Almería (España). Escribes en español de España, claro y cercano, para Instagram y Facebook.
+
+Reglas que no se pueden saltar:
+- Usa solo los datos de la ficha. No inventes metros, precios, estancias, orientación, vistas, distancias, servicios cercanos ni ningún otro dato. Si un dato no está, no lo menciones.
+- Si la ficha incluye el certificado energético, menciónalo en la publicación.
+- No escribas hashtags: la aplicación los añade después.
+- No uses lenguaje discriminatorio ni dirijas el anuncio a un perfil de comprador por origen, edad, sexo, religión u otras características personales.
+- Emojis con moderación (como mucho uno por párrafo) y sin abusar de mayúsculas.
+- La primera línea de cada texto debe enganchar por sí sola (en Instagram solo se ven unos 125 caracteres antes del "más").
+- Cierra con una llamada a la acción usando el contacto que se indica.
+
+Formatos:
+- publicacion: texto para el pie de una publicación de feed, de 500 a 1100 caracteres, en párrafos cortos. Incluye la referencia.
+- carrusel: pie del carrusel (300 a 700 caracteres) y, al final, una línea "Diapositivas:" seguida de 6 a 9 líneas numeradas con el texto breve que irá sobre cada foto (de portada a cierre).
+- historias: de 3 a 5 pantallas, una por línea y numeradas ("1. ..."), con frases muy cortas; la última pide escribir o usar el enlace.
+- reel: guion con "Gancho:" (primeros 3 segundos), "Escenas:" (una línea por escena con el texto en pantalla) y "Cierre:", más una línea "Texto:" con un pie breve de 150 a 300 caracteres.`;
+
+const CAMPAIGN_BRIEF = {
+  nuevo: 'Presentación de un inmueble recién publicado.',
+  precio: 'Bajada de precio: destaca el precio anterior y el nuevo y el ahorro, sin presionar.',
+  puertas: 'Jornada de puertas abiertas: invita a visitar el día y la hora indicados y a reservar hora.',
+  reservado: 'El inmueble está reservado: anúncialo sin dar el precio e invita a quien busque algo parecido en la zona a escribir.',
+  vendido: 'El inmueble se ha vendido o alquilado: celébralo sin dar el precio y ofrece una valoración gratuita a propietarios de la zona.',
+};
+const TONES = { cercano: 'cercano y cálido', profesional: 'profesional y sobrio', lujo: 'elegante, propio de vivienda de alto standing', dinamico: 'dinámico y directo, para público joven' };
+const CAPTION_KEYS = ['publicacion', 'carrusel', 'historias', 'reel'];
+
+const clip = (v, n) => String(v ?? '').slice(0, n).trim();
+function propertySheet(p = {}) {
+  const rows = [
+    ['Referencia', clip(p.reference, 40)], ['Título', clip(p.title, 200)], ['Operación', clip(p.operation, 20)],
+    ['Zona', clip(p.location, 120)], ['Precio', clip(p.price, 40)], ['Precio anterior', clip(p.oldPrice, 40)],
+    ['Superficie construida', clip(p.built, 30)], ['Superficie útil', clip(p.useful, 30)], ['Dormitorios', clip(p.beds, 30)],
+    ['Baños', clip(p.baths, 30)], ['Planta', clip(p.floor, 60)], ['Extras', clip(p.extras, 600)], ['Otros datos', clip(p.other, 300)],
+  ].filter(([, v]) => v);
+  const desc = clip(p.description, 6000);
+  return rows.map(([k, v]) => `- ${k}: ${v}`).join('\n') + (desc ? `\n- Descripción:\n${desc}` : '');
+}
+
+function aiAllowed() {
+  const now = Date.now();
+  while (aiCalls.length && now - aiCalls[0] > 3600_000) aiCalls.shift();
+  if (aiCalls.length >= AI_MAX_PER_HOUR) return false;
+  aiCalls.push(now);
+  return true;
+}
+
+async function askClaude(userText, schema) {
+  const response = await anthropic.beta.messages.create({
+    model: AI_MODEL,
+    max_tokens: 16000,
+    // Si Claude rechaza la petición, la API la reintenta con el modelo de respaldo recomendado
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
+    system: AI_SYSTEM,
+    messages: [{ role: 'user', content: userText }],
+  });
+  if (response.stop_reason === 'refusal') throw Object.assign(new Error('Claude no ha podido redactar este texto. Revisa la ficha e inténtalo de nuevo.'), { status: 422 });
+  if (response.stop_reason === 'max_tokens') throw Object.assign(new Error('El texto ha salido demasiado largo. Inténtalo de nuevo.'), { status: 502 });
+  const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
+  return JSON.parse(text);
+}
+
+async function handleAi(req, res, url) {
+  if (url.pathname === '/api/ai/status') return sendJson(res, 200, { enabled: Boolean(anthropic), model: AI_MODEL });
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'Método no permitido' });
+  if (!anthropic) return sendJson(res, 503, { error: 'La IA no está activada: falta ANTHROPIC_API_KEY en Easypanel.' });
+  if (!aiAllowed()) return sendJson(res, 429, { error: 'Has llegado al límite de textos con IA de esta hora. Inténtalo más tarde.' });
+  const body = JSON.parse((await readRaw(req, 64 * 1024)).toString('utf8'));
+  const tone = TONES[body.tone] || TONES.cercano;
+  const contact = clip(body.contact, 120) || 'pisosenalmeria.es';
+  try {
+    if (url.pathname === '/api/ai/captions') {
+      const keys = (Array.isArray(body.types) ? body.types : []).filter(k => CAPTION_KEYS.includes(k));
+      if (!keys.length) return sendJson(res, 400, { error: 'No se ha pedido ningún texto' });
+      const brief = CAMPAIGN_BRIEF[body.campaign] || CAMPAIGN_BRIEF.nuevo;
+      const extra = body.campaign === 'puertas' && body.openHouse ? `\nFecha y hora de la jornada: ${clip(body.openHouse, 80)}` : '';
+      const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
+      const out = await askClaude(
+        `Campaña: ${brief}${extra}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`,
+        schema,
+      );
+      return sendJson(res, 200, { texts: out, model: AI_MODEL });
+    }
+    if (url.pathname === '/api/ai/rewrite') {
+      const kind = CAPTION_KEYS.includes(body.kind) ? body.kind : 'publicacion';
+      const out = await askClaude(
+        `Mejora este texto de tipo "${kind}" manteniendo los datos y el formato indicado para ese tipo.\nTono: ${tone}\nContacto para el cierre: ${contact}\n${clip(body.instructions, 300) ? `Indicaciones: ${clip(body.instructions, 300)}\n` : ''}\nTexto actual:\n${clip(body.text, 4000)}\n\nFicha del inmueble:\n${propertySheet(body.property)}`,
+        { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: false },
+      );
+      return sendJson(res, 200, { text: out.texto, model: AI_MODEL });
+    }
+    return sendJson(res, 404, { error: 'No encontrado' });
+  } catch (err) {
+    if (err instanceof Anthropic.AuthenticationError) return sendJson(res, 503, { error: 'La clave de Claude no es válida. Revísala en Easypanel.' });
+    if (err instanceof Anthropic.RateLimitError) return sendJson(res, 429, { error: 'Claude está saturado ahora mismo. Inténtalo en un minuto.' });
+    if (err instanceof Anthropic.APIConnectionError) return sendJson(res, 502, { error: 'No se pudo conectar con Claude. Inténtalo de nuevo.' });
+    if (err instanceof Anthropic.APIError) { console.error('Claude', err.status, err.message); return sendJson(res, 502, { error: 'Claude ha devuelto un error. Inténtalo de nuevo.' }); }
+    throw err;
+  }
+}
+
 const writeManifest = (ref, manifest) =>
   writeAtomic(join(photosDir, ref, 'index.json'), JSON.stringify(manifest));
 const sessionDurationMs = 12 * 60 * 60 * 1000;
@@ -94,6 +205,8 @@ function sendJson(res, status, data) {
 }
 
 async function handleApi(req, res, url) {
+  if (url.pathname.startsWith('/api/ai/')) return handleAi(req, res, url);
+
   if (url.pathname === '/api/state') {
     if (req.method === 'GET') {
       try {

@@ -6,7 +6,11 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATA_DIR=/app/data
 
-COPY package.json server.mjs index.html ./
+# Dependencias (SDK de Anthropic para los textos con IA)
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
+COPY server.mjs index.html ./
 
 # Carpeta de datos (inmuebles, contenidos y fotos). En Easypanel se monta un
 # volumen en /app/data para que no se pierda en cada despliegue.
