@@ -180,24 +180,55 @@ async function pullOllamaModel() {
 }
 if (!anthropic) { checkOllama(); setInterval(checkOllama, 60_000).unref(); }
 
-// Instrucciones más cortas para un modelo pequeño que corre en CPU
-const OLLAMA_SYSTEM = AI_SYSTEM
-  .replace('de 500 a 1100 caracteres', 'de 400 a 800 caracteres')
-  .replace('de 6 a 9 líneas numeradas', 'de 5 a 7 líneas numeradas');
+// Instrucciones cortas y directas para un modelo pequeño que corre en CPU
+const OLLAMA_SYSTEM = `Eres redactor de redes sociales de Ruano Inmobiliaria (Almería). Escribe en español de España, correcto y natural.
+
+OBLIGATORIO:
+1. Usa solo los datos de la ficha. No inventes nada.
+2. Incluye siempre el precio (si lo hay) y la referencia en la publicación.
+3. NO escribas hashtags (#).
+4. NO digas para quién es ideal la vivienda (familias, parejas, estudiantes, etc.).
+5. Como mucho 2 emojis en todo el texto.
+6. Termina con una llamada a la acción y el contacto.
+
+FORMATOS:
+- publicacion: 3 o 4 párrafos cortos (400-800 caracteres). Primera frase atractiva.
+- carrusel: un párrafo de 300-500 caracteres y después "Diapositivas:" con 5 a 7 líneas numeradas, una por foto.
+- historias: de 3 a 5 líneas numeradas ("1. ...", "2. ..."), cada una en su propia línea, de menos de 70 caracteres.
+- reel: líneas "Gancho:", "Escenas:" (varias líneas cortas), "Cierre:" y "Texto:" con un pie de 150-300 caracteres.`;
+
+// Limpieza de lo que el modelo pequeño a veces se salta
+const IDEAL_FOR = /\b(?:ideal|perfect[oa]|pensad[oa])\s+para\s+(?:una?\s+)?(?:familias?|parejas?|estudiantes|jóvenes|jubilad[oa]s|niños|personas|adultos|inversores|matrimonios)\b[^,.!\n]*[,.!]?\s*/giu;
+function tidyText(t, kind) {
+  let out = String(t || '')
+    .replace(/(^|\s)#[\p{L}\p{N}_]+/gu, '')                      // hashtags
+    .replace(/\b([\p{L}]{3,})\s+\1\b/giu, '$1')                    // "dúplex dúplex"
+    .replace(IDEAL_FOR, '')                                        // "ideal para familias…"
+    .replace(/(^|[.!?]\s+|¡)(\p{Ll})/gu, (m, a, c) => a + c.toUpperCase()); // mayúscula tras quitarlo
+  // Como mucho 3 emojis
+  let n = 0; out = out.replace(/\p{Extended_Pictographic}️?/gu, e => (++n <= 3 ? e : '')).replace(/[ \t]{2,}/g, ' ');
+  if (kind === 'historias' || kind === 'carrusel' || kind === 'reel') {
+    out = out.replace(/\s+(\d{1,2})\.\s+(?=\S)/g, '\n$1. ')         // "1. … 2. …" en líneas
+      .replace(/\s*(Gancho:|Escenas:|Cierre:|Texto:|Diapositivas:)/g, '\n$1').trim();
+  }
+  return out.replace(/\n{3,}/g, '\n\n').split('\n').map(l => l.trim()).join('\n').trim();
+}
 
 async function askOllama(userText, schema) {
   const r = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: OLLAMA_MODEL, stream: false, format: schema, keep_alive: '15m',
-      options: { temperature: 0.6, num_ctx: 4096 },
+      options: { temperature: 0.4, num_ctx: 4096 },
       messages: [{ role: 'system', content: OLLAMA_SYSTEM }, { role: 'user', content: userText }],
     }),
     signal: AbortSignal.timeout(10 * 60_000),
   });
   if (!r.ok) throw Object.assign(new Error('La IA del servidor ha devuelto un error. Inténtalo de nuevo.'), { status: 502 });
   const d = await r.json();
-  return JSON.parse(d.message?.content || '{}');
+  const out = JSON.parse(d.message?.content || '{}');
+  for (const k of Object.keys(out)) out[k] = tidyText(out[k], k === 'texto' ? 'publicacion' : k);
+  return out;
 }
 
 const aiProvider = () => (anthropic ? 'claude' : ollama.reachable && ollama.hasModel ? 'ollama' : null);
@@ -269,7 +300,8 @@ async function handleAi(req, res, url) {
     const brief = CAMPAIGN_BRIEF[body.campaign] || CAMPAIGN_BRIEF.nuevo;
     const extra = body.campaign === 'puertas' && body.openHouse ? `\nFecha y hora de la jornada: ${clip(body.openHouse, 80)}` : '';
     const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
-    const prompt = `Campaña: ${brief}${extra}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
+    const must = [body.property?.price && !['reservado', 'vendido'].includes(body.campaign) ? `precio ${clip(body.property.price, 40)}` : '', body.property?.reference ? `referencia REF. ${clip(body.property.reference, 40)}` : ''].filter(Boolean).join(' y ');
+    const prompt = `Campaña: ${brief}${extra}${must ? `\nDatos que deben aparecer en la publicación: ${must}.` : ''}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
     return sendJson(res, 202, { job: startAiJob(async () => ({ texts: await generateAi(prompt, schema) })) });
   }
   if (url.pathname === '/api/ai/rewrite') {
