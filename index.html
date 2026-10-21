@@ -231,6 +231,18 @@ function importListing(){const url=document.querySelector('#listingUrl').value.t
 function cleanDescription(t){return String(t||'').replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/ *\n */g,'\n').replace(/\n{3,}/g,'\n\n').trim()}
 function firstSentence(t){const one=t.replace(/\s+/g,' ').trim(),m=one.match(/^.{20,180}?[.!?¡¿…](?=\s|$)/);return m?m[0]:one.length>140?one.slice(0,one.lastIndexOf(' ',140)).replace(/[,;:]$/,'')+'…':one}
 function trimText(t,max){if(t.length<=max)return t;const cut=t.slice(0,max),end=Math.max(cut.lastIndexOf('. '),cut.lastIndexOf('.\n'),cut.lastIndexOf('! '),cut.lastIndexOf('? '));return end>max*.5?cut.slice(0,end+1):cut.slice(0,cut.lastIndexOf(' '))+'…'}
+// Hashtags a partir de los datos del inmueble: marca, zona, tipo, operación y extras (máx. 12)
+const BRAND_TAGS=['RuanoInmobiliaria','InmobiliariaAlmeria'];
+const PROPERTY_TYPES=['ático','atico','dúplex','duplex','chalet','adosado','pareado','casa','villa','apartamento','estudio','loft','piso','bajo','local','oficina','nave','terreno','solar','parcela','garaje','trastero','finca','cortijo'];
+function tagWord(t){return String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ñ/gi,m=>m==='ñ'?'n':'N').split(/[^A-Za-z0-9]+/).filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join('')}
+function propertyHashtags(p){
+ const tags=[...BRAND_TAGS],places=(p.location||'').split(/[,/]/).map(tagWord).filter(Boolean),city=places.at(-1)||'';
+ const title=(p.title||'').toLowerCase(),type=tagWord(PROPERTY_TYPES.find(t=>new RegExp(`(^|[^a-záéíóúñ])${t}`).test(title))||'vivienda'),op=p.operation==='Alquiler'?'Alquiler':'Venta';
+ tags.push(...places,`${type}En${op}`);if(city)tags.push(`${type}En${city}`,`${op}${city}`);
+ (p.extras||'').split(' · ').filter(Boolean).slice(0,3).forEach(x=>{const w=tagWord(x);if(w&&w.length<=20)tags.push(/^(Con|Vistas)/.test(w)?w:'Con'+w)});
+ if(city!=='Almeria')tags.push('Almeria');
+ const seen=new Set();return tags.filter(t=>t&&!seen.has(t.toLowerCase())&&seen.add(t.toLowerCase())).slice(0,12).map(t=>'#'+t).join(' ')}
+function addHashtags(p,ref){const tags=propertyHashtags(p);content.filter(x=>x.propertyRef===ref&&x.type!=='Historia'&&!x.caption.includes('#'+BRAND_TAGS[0])).forEach(x=>{x.caption=`${x.caption.trimEnd()}\n\n${tags}`})}
 function generatePropertyPack(id){if(id)setActiveProperty(id);const p=getActiveProperty();if(!p){showToast('Primero importa o añade un inmueble');showView('assets');return false}const ref=String(p.reference);
  if(content.some(x=>x.propertyRef===ref)){showToast(`El paquete REF. ${ref} ya está en Contenidos`);showView('content');return true}
  const day=n=>{const d=new Date();d.setDate(d.getDate()+n);return isoDate(d)},extras=(p.extras||'').split(' · ').filter(Boolean),feats=[p.built,p.beds,p.baths].filter(Boolean).join(', '),where=p.location&&!p.title.toLowerCase().includes(p.location.split(',')[0].trim().toLowerCase())?` en ${p.location}`:'',joinY=a=>a.length>1?a.slice(0,-1).join(', ')+' y '+a.at(-1):a.join(''),low=extras.map(x=>x.toLowerCase()),newExtras=low.filter(x=>!p.title.toLowerCase().includes(x)),price=p.price?` ${p.price}.`:'';
@@ -241,13 +253,13 @@ function generatePropertyPack(id){if(id)setActiveProperty(id);const p=getActiveP
   {...base,id:now+2,title:`REF. ${ref} · Carrusel de vivienda`,type:'Carrusel',date:day(3),caption:`${hook}\n\n${rest?trimText(rest,500)+'\n\n':''}${data}\nDesliza para ver la vivienda · REF. ${ref}\n\nDiapositivas: portada, ${[...low,'salón','cocina','dormitorios','baño'].join(', ')} y cierre.`,icon:'≡'},
   {...base,id:now+3,title:`REF. ${ref} · Historias`,type:'Historia',channel:'Instagram',date:day(4),caption:`1. ${hook}\n2. ${[p.price,feats].filter(Boolean).join(' · ')||p.title}\n3. ¿Quieres verla? Escríbenos · REF. ${ref}`,icon:'◉'},
   {...base,id:now+4,title:`REF. ${ref} · Reel`,type:'Reel',channel:'Instagram',date:day(6),caption:`Gancho: ${hook}\nRecorrido: ${p.title.charAt(0).toLowerCase()+p.title.slice(1)}${newExtras.length?', con '+joinY(newExtras):''}.\nCierre: REF. ${ref} y contacto.\n\nTexto: ${trimText(desc,300)}`,icon:'▶'});
- save();renderAll();showView('content');showToast(`4 borradores de la REF. ${ref} creados con la descripción`);return true}
+ addHashtags(p,ref);save();renderAll();showView('content');showToast(`4 borradores de la REF. ${ref} creados con la descripción`);return true}
  content.unshift(
   {...base,id:now+1,title:`REF. ${ref} · Publicación principal`,type:'Publicación',date:day(1),caption:`${p.title}${where}.${feats?' '+feats.charAt(0).toUpperCase()+feats.slice(1)+'.':''}${low.length?' Con '+joinY(low)+'.':''}${price} Solicita tu visita · REF. ${ref}.`,icon:'⌂'},
   {...base,id:now+2,title:`REF. ${ref} · Carrusel de vivienda`,type:'Carrusel',date:day(3),caption:`Carrusel: portada, ${[...low,'salón','cocina','dormitorios','baño'].join(', ')} y cierre con REF. ${ref}.`,icon:'≡'},
   {...base,id:now+3,title:`REF. ${ref} · Historias`,type:'Historia',channel:'Instagram',date:day(4),caption:`Historias con los datos principales (${[p.price,feats].filter(Boolean).join(' · ')||p.title}) y llamada a solicitar visita.`,icon:'◉'},
   {...base,id:now+4,title:`REF. ${ref} · Reel`,type:'Reel',channel:'Instagram',date:day(6),caption:`Guion: ${p.title.charAt(0).toLowerCase()+p.title.slice(1)}${newExtras.length?', con '+joinY(newExtras):''}. Cierre con REF. ${ref} y contacto.`,icon:'▶'});
- save();renderAll();showView('content');showToast(`4 borradores de la REF. ${ref} creados y pendientes de revisión`);return true}
+ addHashtags(p,ref);save();renderAll();showView('content');showToast(`4 borradores de la REF. ${ref} creados y pendientes de revisión`);return true}
 document.querySelector('#propertyForm').addEventListener('submit',e=>{e.preventDefault();const f=e.target,raw=Object.fromEntries(new FormData(f));Object.keys(raw).forEach(k=>raw[k]=String(raw[k]).trim());
  const prop={reference:raw.reference.replace(/^ref\.?\s*/i,''),title:raw.title,location:raw.location,operation:raw.operation,price:formatPrice(raw.price,raw.operation),built:raw.built?raw.built+' m²':'',useful:raw.useful?raw.useful+' m² útiles':'',beds:raw.beds!==''?plural(raw.beds,'dormitorio','dormitorios'):'',baths:raw.baths!==''?plural(raw.baths,'baño','baños'):'',floor:raw.floor,extras:raw.extras.split(/\s*[,·;]\s*/).filter(Boolean).join(' · '),description:raw.description,manual:true,raw};
  const list=getProperties(),editId=Number(f.dataset.editId);
