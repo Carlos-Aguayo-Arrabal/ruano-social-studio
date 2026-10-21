@@ -118,7 +118,7 @@
             </div>
             <label>Referencia<input id="photoReference" placeholder="Ej. REF. 2388"></label>
             <label>Texto del pie<input id="footerText" value="pisosenalmeria.es  ·  950 08 30 47"></label>
-            <div class="editor-buttons"><button class="secondary-button" id="resetPhoto">Restablecer</button><button class="primary-button" id="downloadPhoto" disabled>Descargar PNG</button></div>
+            <div class="editor-buttons"><button class="secondary-button" id="resetPhoto">Restablecer</button><button class="primary-button" id="downloadPhoto" disabled>Descargar JPG</button></div>
             <button class="secondary-button" id="downloadAllPhotos" disabled style="width:100%">Descargar todas (<span id="downloadAllCount">0</span>)</button>
           </article>
           <article class="panel preview-panel"><div class="preview-head"><div><h2>2. Vista previa</h2><p>Así quedará la imagen final</p></div><span id="previewSize">1080 × 1350 px</span></div><div class="canvas-wrap"><canvas id="photoCanvas" width="1080" height="1350"></canvas><div class="canvas-empty" id="canvasEmpty"><span>▧</span><strong>Sube una fotografía para comenzar</strong></div></div></article>
@@ -273,6 +273,8 @@ function getLeveledSource(img){
 // Las fotos del móvil pueden tener 12–48 MP, pero la imagen final mide 1080 px de ancho.
 // Se trabaja con una copia reducida (máx. 3000 px por lado) y una miniatura para la galería.
 const WORK_MAX=3000,THUMB_MAX=240;
+// Para redes sociales: JPG al 85 %, unas 10 veces más ligero que PNG sin diferencia visible (Instagram lo recomprime igualmente)
+const JPG_QUALITY=.85;
 async function decodeScaled(file,max){
  const probe=await createImageBitmap(file);const k=Math.min(1,max/Math.max(probe.width,probe.height));
  if(k===1)return probe;
@@ -348,7 +350,7 @@ document.querySelector('#autoLevels').addEventListener('change',e=>{const a=curr
 document.querySelector('#rotate').addEventListener('input',e=>{const a=currentAdjust();if(!a)return;a.rotate=Number(e.target.value);document.querySelector('#rotateVal').textContent=formatDeg(e.target.value);scheduleDraw()});
 document.querySelector('#resetAdjustments').addEventListener('click',()=>{if(!photoState.images.length)return;photoState.adjustments[photoState.active]=defaultAdjust();syncAdjustUI();drawPhoto()});
 document.querySelector('#resetPhoto').addEventListener('click',()=>{photoState.images.forEach(img=>URL.revokeObjectURL(img.src));photoState.images=[];photoState.adjustments=[];photoState.active=0;renderGallery();syncAdjustUI();document.querySelector('#photoInput').value='';photoCanvas.style.display='none';document.querySelector('#canvasEmpty').style.display='grid';document.querySelector('#downloadPhoto').disabled=true});
-document.querySelector('#downloadPhoto').addEventListener('click',()=>{if(!photoState.images[photoState.active])return;drawPhoto();const a=document.createElement('a');a.download=`ruano-${document.querySelector('#photoReference').value.trim().toLowerCase().replace(/\s+/g,'-')||'publicacion'}.png`;a.href=photoCanvas.toDataURL('image/png');a.click();showToast('Imagen preparada en PNG')});
+document.querySelector('#downloadPhoto').addEventListener('click',()=>{if(!photoState.images[photoState.active])return;drawPhoto();const a=document.createElement('a');a.download=`ruano-${document.querySelector('#photoReference').value.trim().toLowerCase().replace(/\s+/g,'-')||'publicacion'}.jpg`;a.href=photoCanvas.toDataURL('image/jpeg',JPG_QUALITY);a.click();showToast('Imagen preparada en JPG')});
 document.querySelector('#downloadAllPhotos').addEventListener('click',async()=>{
  if(!photoState.images.length)return;
  const btn=document.querySelector('#downloadAllPhotos'),original=btn.textContent;btn.disabled=true;
@@ -357,8 +359,8 @@ document.querySelector('#downloadAllPhotos').addEventListener('click',async()=>{
   btn.textContent=`Descargando ${i+1}/${photoState.images.length}…`;
   paintCanvas(photoState.images[i],photoState.adjustments[i]);
   const a=document.createElement('a');
-  a.download=multiple?`ruano-${ref}-${i+1}.png`:`ruano-${ref}.png`;
-  a.href=photoCanvas.toDataURL('image/png');
+  a.download=multiple?`ruano-${ref}-${i+1}.jpg`:`ruano-${ref}.jpg`;
+  a.href=photoCanvas.toDataURL('image/jpeg',JPG_QUALITY);
   a.click();
   await new Promise(r=>setTimeout(r,350));
  }
