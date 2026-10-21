@@ -559,7 +559,7 @@ const loginPage = (error = '') => `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Acceso · Ruano Social Studio</title>
+  <title>Acceso · Momentun Digital</title>
   <style>
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f7fa;color:#172438;font-family:Arial,sans-serif;padding:20px}
     main{width:min(420px,100%);background:#fff;border:1px solid #e2e8ef;border-radius:18px;padding:34px;box-shadow:0 18px 55px rgba(16,42,71,.1)}
@@ -573,9 +573,9 @@ const loginPage = (error = '') => `<!doctype html>
   </style>
 </head>
 <body><main>
-  <div class="logo">R</div>
-  <h1>Ruano Social Studio</h1>
-  <p>Acceso privado al planificador de contenidos de Ruano Inmobiliaria.</p>
+  <div class="logo">M</div>
+  <h1>Momentun Digital</h1>
+  <p>Acceso privado al estudio de contenidos para redes sociales de inmobiliarias.</p>
   ${error ? '<div class="error">Usuario o contraseña incorrectos.</div>' : ''}
   <form method="post" action="/login">
     <label>Usuario<input name="username" autocomplete="username" required autofocus></label>
@@ -773,5 +773,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`Ruano Social Studio escuchando en el puerto ${port}`);
+  console.log(`Momentun Digital Studio escuchando en el puerto ${port}`);
 });
