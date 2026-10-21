@@ -1,6 +1,6 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -17,6 +17,60 @@ if (!username || !password || !sessionSecret) {
 }
 
 const indexHtml = await readFile(join(__dirname, 'index.html'));
+
+// Datos persistentes: en producción /app/data es un volumen de Easypanel
+const dataDir = process.env.DATA_DIR || join(__dirname, 'data');
+const stateFile = join(dataDir, 'state.json');
+const photosDir = join(dataDir, 'photos');
+await mkdir(photosDir, { recursive: true });
+const MAX_STATE_BYTES = 5 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+
+const safeRef = r => (/^[A-Za-z0-9_-]{1,40}$/.test(r || '') ? r : null);
+const safeId = i => (/^[a-f0-9]{24}$/.test(i || '') ? i : null);
+
+// Serializa las escrituras por clave para que no se pisen
+const locks = new Map();
+function withLock(key, fn) {
+  const run = (locks.get(key) || Promise.resolve()).then(fn, fn);
+  locks.set(key, run.catch(() => {}));
+  return run;
+}
+
+async function writeAtomic(file, data) {
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmp, data);
+  await rename(tmp, file);
+}
+
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(Object.assign(new Error('Petición demasiado grande'), { status: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+async function readManifest(ref) {
+  try {
+    return JSON.parse(await readFile(join(photosDir, ref, 'index.json'), 'utf8'));
+  } catch {
+    return { photos: [] };
+  }
+}
+
+const writeManifest = (ref, manifest) =>
+  writeAtomic(join(photosDir, ref, 'index.json'), JSON.stringify(manifest));
 const sessionDurationMs = 12 * 60 * 60 * 1000;
 
 function securityHeaders(extra = {}) {
@@ -33,6 +87,99 @@ function securityHeaders(extra = {}) {
 function send(res, status, body, headers = {}) {
   res.writeHead(status, securityHeaders(headers));
   res.end(body);
+}
+
+function sendJson(res, status, data) {
+  send(res, status, JSON.stringify(data), { 'Content-Type': 'application/json; charset=utf-8' });
+}
+
+async function handleApi(req, res, url) {
+  if (url.pathname === '/api/state') {
+    if (req.method === 'GET') {
+      try {
+        return send(res, 200, await readFile(stateFile), { 'Content-Type': 'application/json; charset=utf-8' });
+      } catch (err) {
+        if (err.code === 'ENOENT') return sendJson(res, 200, {});
+        throw err;
+      }
+    }
+    if (req.method === 'PUT') {
+      const body = await readRaw(req, MAX_STATE_BYTES);
+      const data = JSON.parse(body.toString('utf8'));
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return sendJson(res, 400, { error: 'Formato no válido' });
+      data.savedAt = new Date().toISOString();
+      await withLock('state', () => writeAtomic(stateFile, JSON.stringify(data)));
+      return sendJson(res, 200, { ok: true, savedAt: data.savedAt });
+    }
+    return sendJson(res, 405, { error: 'Método no permitido' });
+  }
+
+  // /api/photos/:ref  y  /api/photos/:ref/:id(.webp|.jpg)
+  const m = url.pathname.match(/^\/api\/photos\/([^/]+)(?:\/([^/.]+)(\.(?:jpg|webp))?)?$/);
+  if (!m) return sendJson(res, 404, { error: 'No encontrado' });
+  const ref = safeRef(decodeURIComponent(m[1]));
+  if (!ref) return sendJson(res, 400, { error: 'Referencia no válida' });
+  const dir = join(photosDir, ref);
+
+  if (!m[2]) {
+    if (req.method === 'GET') return sendJson(res, 200, await readManifest(ref));
+    if (req.method === 'POST') {
+      const body = await readRaw(req, MAX_PHOTO_BYTES);
+      // Se guardan en WebP (ocupa menos); JPG como alternativa para navegadores sin WebP
+      const isWebp = body.length > 12 && body.toString('ascii', 0, 4) === 'RIFF' && body.toString('ascii', 8, 12) === 'WEBP';
+      const isJpg = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
+      if (!isWebp && !isJpg) return sendJson(res, 400, { error: 'Solo se admiten fotos WebP o JPG' });
+      const id = crypto.randomBytes(12).toString('hex');
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, `${id}.${isWebp ? 'webp' : 'jpg'}`), body);
+      await withLock(ref, async () => {
+        const manifest = await readManifest(ref);
+        manifest.photos.push({ id, adjust: null });
+        await writeManifest(ref, manifest);
+      });
+      return sendJson(res, 201, { id, bytes: body.length });
+    }
+    if (req.method === 'PUT') {
+      // Orden y ajustes; solo se aceptan fotos que ya existen
+      const data = JSON.parse((await readRaw(req, 256 * 1024)).toString('utf8'));
+      const result = await withLock(ref, async () => {
+        const known = new Set((await readManifest(ref)).photos.map(p => p.id));
+        const photos = (Array.isArray(data.photos) ? data.photos : [])
+          .filter(p => p && known.has(p.id))
+          .map(p => ({ id: p.id, adjust: p.adjust && typeof p.adjust === 'object' ? p.adjust : null }));
+        await mkdir(dir, { recursive: true });
+        await writeManifest(ref, { photos });
+        return photos.length;
+      });
+      return sendJson(res, 200, { ok: true, photos: result });
+    }
+    return sendJson(res, 405, { error: 'Método no permitido' });
+  }
+
+  const id = safeId(m[2]);
+  if (!id) return sendJson(res, 400, { error: 'Foto no válida' });
+  if (req.method === 'GET') {
+    for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
+      try {
+        return send(res, 200, await readFile(join(dir, `${id}.${ext}`)), {
+          'Content-Type': type,
+          'Cache-Control': 'private, max-age=31536000, immutable',
+        });
+      } catch {}
+    }
+    return sendJson(res, 404, { error: 'Foto no encontrada' });
+  }
+  if (req.method === 'DELETE') {
+    await withLock(ref, async () => {
+      const manifest = await readManifest(ref);
+      manifest.photos = manifest.photos.filter(p => p.id !== id);
+      await writeManifest(ref, manifest);
+      await unlink(join(dir, `${id}.webp`)).catch(() => {});
+      await unlink(join(dir, `${id}.jpg`)).catch(() => {});
+    });
+    return sendJson(res, 200, { ok: true });
+  }
+  return sendJson(res, 405, { error: 'Método no permitido' });
 }
 
 function parseCookies(req) {
@@ -172,8 +319,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (!validSession(req)) {
+    if (url.pathname.startsWith('/api/')) return sendJson(res, 401, { error: 'Sesión caducada' });
     res.writeHead(302, { Location: '/login' });
     return res.end();
+  }
+
+  if (url.pathname.startsWith('/api/')) {
+    try {
+      return await handleApi(req, res, url);
+    } catch (err) {
+      console.error('Error en', req.method, url.pathname, err.message);
+      return sendJson(res, err.status || (err instanceof SyntaxError ? 400 : 500), { error: err.status ? err.message : 'No se pudo completar la operación' });
+    }
   }
 
   if ((url.pathname === '/' || url.pathname === '/index.html') && req.method === 'GET') {
