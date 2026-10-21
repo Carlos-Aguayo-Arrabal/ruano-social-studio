@@ -1,6 +1,6 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink, copyFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import { dirname, join } from 'node:path';
@@ -24,6 +24,13 @@ const dataDir = process.env.DATA_DIR || join(__dirname, 'data');
 const stateFile = join(dataDir, 'state.json');
 const photosDir = join(dataDir, 'photos');
 await mkdir(photosDir, { recursive: true });
+
+// Copia de seguridad del estado en cada arranque; se guardan las 10 últimas
+try {
+  await copyFile(stateFile, join(dataDir, `state.backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+  const backups = (await readdir(dataDir)).filter(f => f.startsWith('state.backup-')).sort();
+  for (const f of backups.slice(0, -10)) await unlink(join(dataDir, f));
+} catch {}
 const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 
@@ -124,7 +131,16 @@ function aiAllowed() {
   return true;
 }
 
-async function askClaude(userText, schema) {
+// Las instrucciones se escriben para Ruano; con otra empresa se cambia el nombre y la zona
+function systemFor(base, brand) {
+  const name = clip(brand?.name, 80), zone = clip(brand?.zone, 60);
+  if (!name) return base;
+  return base
+    .replace('Ruano Inmobiliaria, una agencia de Almería (España)', `${name}, una inmobiliaria de ${zone || 'España'}${zone ? ' (España)' : ''}`)
+    .replace('Ruano Inmobiliaria (Almería)', zone ? `${name} (${zone})` : name);
+}
+
+async function askClaude(userText, schema, brand) {
   const response = await anthropic.beta.messages.create({
     model: AI_MODEL,
     max_tokens: 16000,
@@ -132,7 +148,7 @@ async function askClaude(userText, schema) {
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
     output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
-    system: AI_SYSTEM,
+    system: systemFor(AI_SYSTEM, brand),
     messages: [{ role: 'user', content: userText }],
   });
   if (response.stop_reason === 'refusal') throw Object.assign(new Error('Claude no ha podido redactar este texto. Revisa la ficha e inténtalo de nuevo.'), { status: 422 });
@@ -238,24 +254,24 @@ function ensureEssentials(texts, property = {}, campaign, contact) {
 }
 
 // El modelo pequeño responde mejor con un texto por petición: se piden uno a uno y se juntan
-async function askOllama(userText, schema) {
+async function askOllama(userText, schema, brand) {
   const keys = Object.keys(schema.properties || {});
-  if (keys.length <= 1) return askOllamaOne(userText, schema);
+  if (keys.length <= 1) return askOllamaOne(userText, schema, brand);
   const out = {};
   for (const k of keys) {
     const one = { type: 'object', properties: { [k]: schema.properties[k] }, required: [k], additionalProperties: false };
-    Object.assign(out, await askOllamaOne(userText.replace(/Textos que necesito: [^\n]*/, `Texto que necesito ahora: ${k}`), one));
+    Object.assign(out, await askOllamaOne(userText.replace(/Textos que necesito: [^\n]*/, `Texto que necesito ahora: ${k}`), one, brand));
   }
   return out;
 }
 
-async function askOllamaOne(userText, schema) {
+async function askOllamaOne(userText, schema, brand) {
   const r = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: OLLAMA_MODEL, stream: false, format: schema, keep_alive: '15m',
       options: { temperature: 0.4, num_ctx: 4096 },
-      messages: [{ role: 'system', content: OLLAMA_SYSTEM }, { role: 'user', content: userText }],
+      messages: [{ role: 'system', content: systemFor(OLLAMA_SYSTEM, brand) }, { role: 'user', content: userText }],
     }),
     signal: AbortSignal.timeout(10 * 60_000),
   });
@@ -274,10 +290,10 @@ async function askOllamaOne(userText, schema) {
 
 const aiProvider = () => (anthropic ? 'claude' : ollama.reachable && ollama.hasModel ? 'ollama' : null);
 
-async function generateAi(userText, schema) {
+async function generateAi(userText, schema, brand) {
   const provider = aiProvider();
   if (provider === 'ollama') {
-    try { return await askOllama(userText, schema); }
+    try { return await askOllama(userText, schema, brand); }
     catch (err) {
       if (err.status) throw err;
       if (err.name === 'TimeoutError') throw Object.assign(new Error('La IA del servidor ha tardado demasiado. Inténtalo con menos textos.'), { status: 504 });
@@ -286,7 +302,7 @@ async function generateAi(userText, schema) {
     }
   }
   if (provider === 'claude') {
-    try { return await askClaude(userText, schema); }
+    try { return await askClaude(userText, schema, brand); }
     catch (err) {
       if (err instanceof Anthropic.AuthenticationError) throw Object.assign(new Error('La clave de Claude no es válida. Revísala en Easypanel.'), { status: 503 });
       if (err instanceof Anthropic.RateLimitError) throw Object.assign(new Error('Claude está saturado ahora mismo. Inténtalo en un minuto.'), { status: 429 });
@@ -343,13 +359,13 @@ async function handleAi(req, res, url) {
     const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
     const must = [body.property?.price && !['reservado', 'vendido'].includes(body.campaign) ? `precio ${clip(body.property.price, 40)}` : '', body.property?.reference ? `referencia REF. ${clip(body.property.reference, 40)}` : ''].filter(Boolean).join(' y ');
     const prompt = `Campaña: ${brief}${extra}${must ? `\nDatos que deben aparecer en la publicación: ${must}.` : ''}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
-    return sendJson(res, 202, { job: startAiJob(async () => ({ texts: ensureEssentials(await generateAi(prompt, schema), body.property, body.campaign, contact) })) });
+    return sendJson(res, 202, { job: startAiJob(async () => ({ texts: ensureEssentials(await generateAi(prompt, schema, body.brand), body.property, body.campaign, contact) })) });
   }
   if (url.pathname === '/api/ai/rewrite') {
     const kind = CAPTION_KEYS.includes(body.kind) ? body.kind : 'publicacion';
     const prompt = `Mejora este texto de tipo "${kind}" manteniendo los datos y el formato indicado para ese tipo.\nTono: ${tone}\nContacto para el cierre: ${contact}\n${clip(body.instructions, 300) ? `Indicaciones: ${clip(body.instructions, 300)}\n` : ''}\nTexto actual:\n${clip(body.text, 4000)}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
     const schema = { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: false };
-    return sendJson(res, 202, { job: startAiJob(async () => ({ text: (await generateAi(prompt, schema)).texto })) });
+    return sendJson(res, 202, { job: startAiJob(async () => ({ text: (await generateAi(prompt, schema, body.brand)).texto })) });
   }
   return sendJson(res, 404, { error: 'No encontrado' });
 }
