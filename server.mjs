@@ -198,20 +198,35 @@ FORMATOS:
 - reel: líneas "Gancho:", "Escenas:" (varias líneas cortas), "Cierre:" y "Texto:" con un pie de 150-300 caracteres.`;
 
 // Limpieza de lo que el modelo pequeño a veces se salta
-const IDEAL_FOR = /\b(?:ideal|perfect[oa]|pensad[oa])\s+para\s+(?:una?\s+)?(?:familias?|parejas?|estudiantes|jóvenes|jubilad[oa]s|niños|personas|adultos|inversores|matrimonios)\b[^,.!\n]*[,.!]?\s*/giu;
+const IDEAL_FOR = /(?:\b(?:ideal|perfect[oa]|pensad[oa])\s+)?\bpara\s+(?:una?\s+|tu\s+|su\s+)?(?:familias?|parejas?|estudiantes|jóvenes|jubilad[oa]s|niños|personas|adultos|inversores|matrimonios)\b[^,.!\n]*/giu;
 function tidyText(t, kind) {
   let out = String(t || '')
     .replace(/(^|\s)#[\p{L}\p{N}_]+/gu, '')                      // hashtags
     .replace(/\b([\p{L}]{3,})\s+\1\b/giu, '$1')                    // "dúplex dúplex"
     .replace(IDEAL_FOR, '')                                        // "ideal para familias…"
-    .replace(/(^|[.!?]\s+|¡)(\p{Ll})/gu, (m, a, c) => a + c.toUpperCase()); // mayúscula tras quitarlo
+    .replace(/(^|[.!?]\s*|\n)\s*,\s*/g, '$1')                       // coma suelta que queda al quitarlo
+    .replace(/\.{2,}/g, '.')
+    .replace(/(^|[.!?]\s+|¡|\n)(\p{Ll})/gu, (m, a, c) => a + c.toUpperCase()); // mayúscula tras quitarlo
   // Como mucho 3 emojis
   let n = 0; out = out.replace(/\p{Extended_Pictographic}️?/gu, e => (++n <= 3 ? e : '')).replace(/[ \t]{2,}/g, ' ');
   if (kind === 'historias' || kind === 'carrusel' || kind === 'reel') {
-    out = out.replace(/\s+(\d{1,2})\.\s+(?=\S)/g, '\n$1. ')         // "1. … 2. …" en líneas
-      .replace(/\s*(Gancho:|Escenas:|Cierre:|Texto:|Diapositivas:)/g, '\n$1').trim();
+    out = out.replace(/(?<=\D)\s*(\d{1,2})\.\s*(?=\p{L}|¡|¿|\p{Extended_Pictographic})/gu, '\n$1. ') // "1. … 2. …" en líneas
+      .replace(/\s*(Gancho:|Escenas:|Cierre:|Texto:|Diapositivas:)/g, '\n$1')
+      .replace(/\s*\d{1,2}\.\s*$/, '').trim();                      // número suelto al final
   }
-  return out.replace(/\n{3,}/g, '\n\n').split('\n').map(l => l.trim()).join('\n').trim();
+  return out.replace(/\s+([,.!])/g, '$1').replace(/([.!?])[.,]+/g, '$1').replace(/\n{3,}/g, '\n\n').split('\n').map(l => l.trim()).join('\n').trim();
+}
+
+// La publicación siempre acaba con referencia, precio y contacto, aunque el modelo pequeño los olvide
+function ensureEssentials(texts, property = {}, campaign, contact) {
+  if (!texts.publicacion) return texts;
+  const ref = clip(property.reference, 40), price = ['reservado', 'vendido'].includes(campaign) ? '' : clip(property.price, 40);
+  const lines = [];
+  if (ref && !texts.publicacion.includes(ref)) lines.push(`REF. ${ref}`);
+  if (price && !texts.publicacion.includes(price.replace(/\s*€.*/, ''))) lines.push(price);
+  const tail = [lines.join(' · '), !texts.publicacion.includes(contact.split('·')[0].trim()) ? `Más información: ${contact}` : ''].filter(Boolean).join('\n');
+  if (tail) texts.publicacion = `${texts.publicacion.trim()}\n\n${tail}`;
+  return texts;
 }
 
 async function askOllama(userText, schema) {
@@ -302,7 +317,7 @@ async function handleAi(req, res, url) {
     const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
     const must = [body.property?.price && !['reservado', 'vendido'].includes(body.campaign) ? `precio ${clip(body.property.price, 40)}` : '', body.property?.reference ? `referencia REF. ${clip(body.property.reference, 40)}` : ''].filter(Boolean).join(' y ');
     const prompt = `Campaña: ${brief}${extra}${must ? `\nDatos que deben aparecer en la publicación: ${must}.` : ''}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
-    return sendJson(res, 202, { job: startAiJob(async () => ({ texts: await generateAi(prompt, schema) })) });
+    return sendJson(res, 202, { job: startAiJob(async () => ({ texts: ensureEssentials(await generateAi(prompt, schema), body.property, body.campaign, contact) })) });
   }
   if (url.pathname === '/api/ai/rewrite') {
     const kind = CAPTION_KEYS.includes(body.kind) ? body.kind : 'publicacion';
