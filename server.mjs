@@ -212,7 +212,15 @@ function tidyText(t, kind) {
   if (kind === 'historias' || kind === 'carrusel' || kind === 'reel') {
     out = out.replace(/(?<=\D)\s*(\d{1,2})\.\s*(?=\p{L}|¡|¿|\p{Extended_Pictographic})/gu, '\n$1. ') // "1. … 2. …" en líneas
       .replace(/\s*(Gancho:|Escenas:|Cierre:|Texto:|Diapositivas:)/g, '\n$1')
-      .replace(/\s*\d{1,2}\.\s*$/, '').trim();                      // número suelto al final
+      .replace(/(?<=^|\s)\d{1,2}\.\s*$/, '').trim();                // número suelto al final (no "REF. 2414.")
+  }
+  if (kind === 'historias') {
+    // Como mucho 5 pantallas, sin líneas vacías y numeradas de nuevo
+    const items = out.split('\n').map(l => l.replace(/^\d{1,2}\.\s*/, '').trim()).filter(l => l.length > 2).slice(0, 5);
+    out = items.map((l, i) => `${i + 1}. ${l}`).join('\n');
+  }
+  if (kind === 'carrusel' && !/Diapositivas:/i.test(out)) {
+    out += '\n\nDiapositivas:\n1. Portada con precio y zona\n2. Salón\n3. Cocina\n4. Dormitorios\n5. Baños\n6. Detalles y extras\n7. Contacto y referencia';
   }
   return out.replace(/\s+([,.!])/g, '$1').replace(/([.!?])[.,]+/g, '$1').replace(/\n{3,}/g, '\n\n').split('\n').map(l => l.trim()).join('\n').trim();
 }
