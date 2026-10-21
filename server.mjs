@@ -122,7 +122,9 @@ const loginPage = (error = '') => `<!doctype html>
     <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
     <button type="submit">Entrar</button>
   </form>
-</main></body></html>`;
+</main>
+<script>try{if(location.hash.startsWith('#importar='))sessionStorage.setItem('ruanoPendingImport',location.hash.slice(10))}catch(e){}</script>
+</body></html>`;
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
