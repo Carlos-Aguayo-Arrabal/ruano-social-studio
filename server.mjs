@@ -456,6 +456,7 @@ function sendJson(res, status, data) {
 
 async function handleApi(req, res, url, user) {
   if (url.pathname.startsWith('/api/meta/') || url.pathname.startsWith('/api/media/')) return handleMeta(req, res, url, user);
+  if (url.pathname.startsWith('/api/gdrive/')) return handleGdrive(req, res, url, user);
   const deny = () => sendJson(res, 403, { error: 'No tienes acceso a esta empresa' });
   const brandParam = () => { const id = safeBrandId(url.searchParams.get('brand')); return id && canBrand(user, id) ? id : null; };
   if (url.pathname === '/api/me') return sendJson(res, 200, publicUser(user));
@@ -1185,6 +1186,159 @@ setTimeout(() => backupNow().catch(err => console.error('Copia de seguridad', er
 setInterval(() => backupNow().catch(err => console.error('Copia de seguridad', err.message)), 24 * 3600_000).unref();
 
 
+// Dirección pública de la app (enlaces de las fichas y retornos de Meta y Google)
+const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://studio.momentundigital.com').replace(/\/$/, '');
+
+// ═══ Copia externa en Google Drive: datos de cada día (se guardan 30) y todas las fotos, solo lo nuevo o cambiado ═══
+// Variables: GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET (cliente OAuth «Aplicación web» de Google Cloud con la API de Drive activada).
+// Permiso drive.file: la app solo ve y toca lo que ella misma sube, nada más del Drive.
+// GOOGLE_AUTH_URL, GOOGLE_TOKEN_URL y GOOGLE_DRIVE_URL solo sirven para pruebas con un Google simulado.
+const GAUTH = process.env.GOOGLE_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';
+const GTOKEN = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
+const GDRIVE = (process.env.GOOGLE_DRIVE_URL || 'https://www.googleapis.com').replace(/\/$/, '');
+const GDRIVE_SCOPES = 'openid email https://www.googleapis.com/auth/drive.file';
+const gdriveFile = join(dataDir, 'gdrive.json');
+const gdriveConfigured = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+const readGdrive = async () => { try { return JSON.parse(await readFile(gdriveFile, 'utf8')); } catch { return null; } };
+const writeGdrive = g => writeAtomic(gdriveFile, JSON.stringify(g));
+const gdrivePublic = g => g ? { connected: !!g.refreshToken, email: g.email || '', lastRun: g.lastRun || 0, lastOk: g.lastOk || 0, lastError: g.lastError || '', lastSummary: g.lastSummary || '', files: Object.keys(g.files || {}).length, running: gdriveRunning } : { connected: false };
+let gdriveRunning = false;
+
+async function gdriveToken(g) {
+  if (g.access && g.accessExp > Date.now() + 60_000) return g.access;
+  const r = await fetch(GTOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, refresh_token: g.refreshToken, grant_type: 'refresh_token' }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error === 'invalid_grant' ? 'Google ha retirado el permiso: vuelve a conectar Google Drive' : `Google: ${j.error_description || j.error || r.status}`);
+  g.access = j.access_token; g.accessExp = Date.now() + (j.expires_in || 3600) * 1000;
+  return g.access;
+}
+async function gdriveApi(g, method, path, { json, body, type, query } = {}) {
+  const u = new URL(GDRIVE + path);
+  Object.entries(query || {}).forEach(([k, v]) => u.searchParams.set(k, v));
+  const r = await fetch(u, { method, headers: { Authorization: `Bearer ${await gdriveToken(g)}`, ...(json ? { 'Content-Type': 'application/json' } : type ? { 'Content-Type': type } : {}) }, body: json ? JSON.stringify(json) : body });
+  if (r.status === 204) return {};
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(`Drive ${r.status}: ${j.error?.message || 'error'}`); e.status = r.status; throw e; }
+  return j;
+}
+async function gdriveFolder(g, rel, name, parent) {
+  if (g.folders[rel]) return g.folders[rel];
+  const f = await gdriveApi(g, 'POST', '/drive/v3/files', { json: { name, mimeType: 'application/vnd.google-apps.folder', ...(parent ? { parents: [parent] } : {}) }, query: { fields: 'id' } });
+  return (g.folders[rel] = f.id);
+}
+async function gdriveUpload(g, rel, name, parent, data, mime) {
+  const boundary = `b${crypto.randomBytes(8).toString('hex')}`, prev = g.files[rel];
+  const meta = prev ? {} : { name, parents: [parent] };
+  const body = Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`), data, Buffer.from(`\r\n--${boundary}--`)]);
+  const opts = { body, type: `multipart/related; boundary=${boundary}`, query: { uploadType: 'multipart', fields: 'id' } };
+  let f;
+  try { f = await gdriveApi(g, prev ? 'PATCH' : 'POST', prev ? `/upload/drive/v3/files/${prev.id}` : '/upload/drive/v3/files', opts); }
+  catch (err) { if (!(prev && err.status === 404)) throw err; delete g.files[rel]; return gdriveUpload(g, rel, name, parent, data, mime); }
+  g.files[rel] = { id: f.id, sig: crypto.createHash('sha1').update(data).digest('hex') };
+}
+const mimeOf = f => /\.webp$/.test(f) ? 'image/webp' : /\.jpe?g$/.test(f) ? 'image/jpeg' : /\.png$/.test(f) ? 'image/png' : /\.json$/.test(f) ? 'application/json' : 'application/octet-stream';
+
+async function gdriveBackup() {
+  const g = await readGdrive();
+  if (!g?.refreshToken || !gdriveConfigured() || gdriveRunning) return;
+  gdriveRunning = true;
+  let up = 0, same = 0;
+  // Solo se guarda si sigue siendo la misma conexión (no pisa una reconexión o desconexión hecha mientras tanto)
+  const save = async () => { if ((await readGdrive())?.refreshToken === g.refreshToken) await writeGdrive(g); };
+  try {
+    g.folders ||= {}; g.files ||= {};
+    // Si alguien borró la carpeta en Drive, se empieza de cero
+    if (g.folders['']) { try { const f = await gdriveApi(g, 'GET', `/drive/v3/files/${g.folders['']}`, { query: { fields: 'id,trashed' } }); if (f.trashed) throw Object.assign(new Error('papelera'), { status: 404 }); } catch (err) { if (err.status !== 404) throw err; g.folders = {}; g.files = {}; } }
+    const root = await gdriveFolder(g, '', 'Momentun Studio · copia de seguridad', null);
+    const put = async (rel, name, parent, data) => {
+      const sig = crypto.createHash('sha1').update(data).digest('hex');
+      if (g.files[rel]?.sig === sig) { same++; return; }
+      await gdriveUpload(g, rel, name, parent, data, mimeOf(name)); up++;
+    };
+    // 1) Datos del día: contenidos, inmuebles, usuarios, contactos, revisiones y estadísticas
+    const day = new Date().toISOString().slice(0, 10), datos = await gdriveFolder(g, 'datos', 'datos', root), dayId = await gdriveFolder(g, `datos/${day}`, day, datos);
+    for (const [file, name] of [[storeFile, 'store.json'], [usersFile, 'users.json']]) { const d = await readFile(file).catch(() => null); if (d) await put(`datos/${day}/${name}`, name, dayId, d); }
+    for (const [src, pre] of [[leadsDir, 'contactos'], [reviewsDir, 'revisiones'], [statsDir, 'estadisticas']]) for (const f of await readdir(src).catch(() => [])) { const d = await readFile(join(src, f)).catch(() => null); if (d) await put(`datos/${day}/${pre}-${f}`, `${pre}-${f}`, dayId, d); }
+    // Días antiguos fuera (se guardan 30)
+    const days = Object.keys(g.folders).filter(k => /^datos\/\d{4}-\d{2}-\d{2}$/.test(k)).sort();
+    for (const k of days.slice(0, -30)) {
+      await gdriveApi(g, 'DELETE', `/drive/v3/files/${g.folders[k]}`).catch(err => { if (err.status !== 404) throw err; });
+      delete g.folders[k]; for (const f of Object.keys(g.files)) if (f.startsWith(`${k}/`)) delete g.files[f];
+    }
+    // 2) Fotos de cada inmueble (con su index.json). Lo borrado en la app se deja en Drive: nunca se pierde una foto por error.
+    const fotos = await gdriveFolder(g, 'fotos', 'fotos', root);
+    for (const ref of await readdir(photosDir).catch(() => [])) {
+      const files = await readdir(join(photosDir, ref)).catch(() => []);
+      if (!files.length) continue;
+      const refId = await gdriveFolder(g, `fotos/${ref}`, ref, fotos);
+      for (const f of files.filter(f => !f.endsWith('.tmp'))) {
+        const rel = `fotos/${ref}/${f}`;
+        if (g.files[rel] && f !== 'index.json') { same++; continue; } // las fotos no cambian de contenido: cada versión tiene su id
+        const d = await readFile(join(photosDir, ref, f)).catch(() => null); if (d) await put(rel, f, refId, d);
+      }
+      await save(); // se guarda el avance por si se corta a mitad
+    }
+    Object.assign(g, { lastRun: Date.now(), lastOk: Date.now(), lastError: '', lastSummary: `${up} archivos subidos, ${same} ya estaban` });
+  } catch (err) {
+    console.error('Copia en Google Drive', err.message);
+    Object.assign(g, { lastRun: Date.now(), lastError: String(err.message).slice(0, 300) });
+  } finally {
+    await save().catch(() => {});
+    gdriveRunning = false;
+  }
+}
+// Cada 6 horas mira si toca; sube una vez al día (y al arrancar si hace más de 20 h de la última)
+async function gdriveTick() { const g = await readGdrive(); if (g?.refreshToken && Date.now() - (g.lastOk || 0) > 20 * 3600_000 && Date.now() - (g.lastRun || 0) > 3600_000) await gdriveBackup(); }
+setTimeout(() => gdriveTick().catch(() => {}), 120_000).unref();
+setInterval(() => gdriveTick().catch(() => {}), 6 * 3600_000).unref();
+
+async function handleGdrive(req, res, url, user) {
+  if (user?.role !== 'admin') return sendJson(res, 403, { error: 'Solo los administradores' });
+  const redirect_uri = `${PUBLIC_URL}/api/gdrive/callback`;
+  if (url.pathname === '/api/gdrive/status') return sendJson(res, 200, { configured: gdriveConfigured(), redirectUri: redirect_uri, ...gdrivePublic(await readGdrive()) });
+  if (url.pathname === '/api/gdrive/connect') {
+    if (!gdriveConfigured()) return sendJson(res, 400, { error: 'Falta configurar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en el servidor' });
+    const state = `${user.id}.${Date.now()}`, u = new URL(GAUTH);
+    Object.entries({ client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri, response_type: 'code', scope: GDRIVE_SCOPES, access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state: `${state}.${sign(state)}`, ...(process.env.GDRIVE_ACCOUNT ? { login_hint: process.env.GDRIVE_ACCOUNT } : {}) }).forEach(([k, v]) => u.searchParams.set(k, v));
+    res.writeHead(302, { Location: u.toString() });
+    return res.end();
+  }
+  if (url.pathname === '/api/gdrive/callback') {
+    const back = msg => { res.writeHead(302, { Location: `/#gdrive=${encodeURIComponent(msg)}` }); return res.end(); };
+    const [uid, ts, sig] = String(url.searchParams.get('state') || '').split('.');
+    if (!sig || !safeEqual(sig, sign(`${uid}.${ts}`)) || Date.now() - Number(ts) > 30 * 60_000 || uid !== user.id) return back('error:El enlace de conexión ha caducado. Vuelve a intentarlo.');
+    if (url.searchParams.get('error')) return back('error:Has cancelado la conexión con Google Drive.');
+    try {
+      const r = await fetch(GTOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ code: url.searchParams.get('code') || '', client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, redirect_uri, grant_type: 'authorization_code' }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error_description || j.error || `error ${r.status}`);
+      const prev = await readGdrive();
+      if (!j.refresh_token && !prev?.refreshToken) throw new Error('Google no ha dado permiso permanente. Quita el acceso de la app en tu cuenta de Google y vuelve a conectar.');
+      let email = '';
+      try { email = JSON.parse(Buffer.from(String(j.id_token || '').split('.')[1] || '', 'base64url').toString('utf8')).email || ''; } catch {}
+      const same = prev?.email && prev.email === email;
+      await writeGdrive({ ...(same ? prev : {}), refreshToken: j.refresh_token || prev.refreshToken, access: j.access_token, accessExp: Date.now() + (j.expires_in || 3600) * 1000, email, connectedAt: Date.now(), lastError: '' });
+      gdriveBackup().catch(() => {});
+      return back(`ok:Google Drive conectado${email ? ` (${email})` : ''}. Haciendo la primera copia…`);
+    } catch (err) { console.error('Conexión Google Drive', err.message); return back(`error:${err.message}`); }
+  }
+  if (url.pathname === '/api/gdrive/run' && req.method === 'POST') {
+    const g = await readGdrive();
+    if (!g?.refreshToken) return sendJson(res, 400, { error: 'Google Drive no está conectado' });
+    if (gdriveRunning) return sendJson(res, 409, { error: 'Ya se está haciendo una copia' });
+    gdriveBackup().catch(() => {});
+    return sendJson(res, 202, { ok: true });
+  }
+  if (url.pathname === '/api/gdrive/disconnect' && req.method === 'POST') {
+    const g = await readGdrive();
+    if (g?.refreshToken) await fetch(`${GTOKEN.replace(/\/token$/, '')}/revoke?token=${encodeURIComponent(g.refreshToken)}`, { method: 'POST' }).catch(() => {});
+    await rm(gdriveFile, { force: true });
+    return sendJson(res, 200, { ok: true });
+  }
+  return sendJson(res, 404, { error: 'No encontrado' });
+}
+
+
 // ═══ Meta (Instagram y Facebook): conexión, medios de cada publicación, publicar y programar ═══
 // Variables: META_APP_ID, META_APP_SECRET (de la app de Meta), PUBLIC_URL (por defecto https://studio.momentundigital.com).
 // META_GRAPH_URL solo sirve para pruebas con un Meta simulado.
@@ -1192,7 +1346,6 @@ const META_VERSION = process.env.META_GRAPH_VERSION || 'v23.0';
 const GRAPH = (process.env.META_GRAPH_URL || `https://graph.facebook.com/${META_VERSION}`).replace(/\/$/, '');
 const META_DIALOG = process.env.META_DIALOG_URL || `https://www.facebook.com/${META_VERSION}/dialog/oauth`;
 const metaConfigured = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET);
-const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://studio.momentundigital.com').replace(/\/$/, '');
 const META_SCOPES = 'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,business_management';
 const metaDir = join(dataDir, 'meta'), mediaDir = join(dataDir, 'media');
 await mkdir(metaDir, { recursive: true }); await mkdir(mediaDir, { recursive: true });
