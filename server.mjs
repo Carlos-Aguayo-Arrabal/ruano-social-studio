@@ -596,6 +596,18 @@ async function handleApi(req, res, url, user) {
   if (url.pathname.startsWith('/api/ai/')) return handleAi(req, res, url);
 
 
+  // /api/photo-counts?ids=a,b,c → { a: 17, b: 0 }
+  if (url.pathname === '/api/photo-counts') {
+    const out = {};
+    for (const raw of String(url.searchParams.get('ids') || '').split(',').slice(0, 300)) {
+      const ref = safeRef(raw);
+      if (!ref) continue;
+      if (user.role !== 'admin') { const owner = await propertyBrand(ref); if (owner && !canBrand(user, owner)) continue; }
+      out[ref] = (await readManifest(ref)).photos?.length || 0;
+    }
+    return sendJson(res, 200, out);
+  }
+
   // /api/photos/:ref  y  /api/photos/:ref/:id(.webp|.jpg)
   const m = url.pathname.match(/^\/api\/photos\/([^/]+)(?:\/([^/.]+)(\.(?:jpg|webp))?)?$/);
   if (!m) return sendJson(res, 404, { error: 'No encontrado' });
