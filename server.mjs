@@ -167,6 +167,7 @@ const CAMPAIGN_BRIEF = {
   puertas: 'Jornada de puertas abiertas: invita a visitar el día y la hora indicados y a reservar hora.',
   reservado: 'El inmueble está reservado: anúncialo sin dar el precio e invita a quien busque algo parecido en la zona a escribir.',
   vendido: 'El inmueble se ha vendido o alquilado: celébralo sin dar el precio y ofrece una valoración gratuita a propietarios de la zona.',
+  destacado: 'Inmueble destacado de la semana: preséntalo como la vivienda elegida de la semana, resalta lo mejor que tiene e invita a pedir visita.',
 };
 const TONES = { cercano: 'cercano y cálido', profesional: 'profesional y sobrio', lujo: 'elegante, propio de vivienda de alto standing', dinamico: 'dinámico y directo, para público joven' };
 const CAPTION_KEYS = ['publicacion', 'carrusel', 'historias', 'reel'];
