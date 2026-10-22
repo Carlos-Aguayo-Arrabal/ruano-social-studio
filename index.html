@@ -833,7 +833,7 @@ const daysIn=p=>Number(p.id)>1.5e12&&Number(p.id)<Date.now()?Math.floor((Date.no
 function propItems(p){const ref=String(p.reference);return content.filter(x=>String(x.propertyRef)===ref)}
 function propInfo(p){const its=propItems(p),n=photoCounts[String(p.id)];return{its,n,pending:its.filter(x=>x.status==='pending'),ready:its.filter(x=>['approved','scheduled'].includes(x.status)),done:packChips(p).done,closed:['reservado','vendido'].includes(p.stamp)}}
 // Texto corto y limpio para la ficha: sin repetir el título, sin mayúsculas gritonas y sin el desglose de impuestos
-function cleanDesc(p){const norm=t=>normTxt(t).replace(/[^a-z0-9ñ]+/g,' ').trim(),tt=norm(p.title),nt=norm(niceTitle(p.title,p));let d=String(p.description||'').split(/\n+/).map(x=>x.trim()).filter(x=>x&&norm(x)!==tt&&norm(x)!==nt).join(' ');
+function cleanDesc(p){const norm=t=>normTxt(t).replace(/[^a-z0-9ñ]+/g,' ').trim(),tt=norm(p.title),nt=norm(niceTitle(p.title,p));let d=String(p.description||'').split(/\n+/).map(x=>x.trim()).filter((x,i)=>x&&norm(x)!==tt&&norm(x)!==nt&&!(i===0&&x.length<70&&!/[.!?]$/.test(x))).join(' ');
  d=d.split(/\bprecio\s*:|\b\d[\d.]*\s*\+\s*\d+\s*%\s*itp|\bno dejes pasar/i)[0].replace(/\b[A-ZÁÉÍÓÚÜÑ]{5,}\b/g,w=>w.toLowerCase()).replace(/\s+/g,' ').trim();
  return d.length>190?d.slice(0,d.lastIndexOf(' ',190)).replace(/[,;:.]$/,'')+'…':d}
 function nextStep(p,n){const k=propInfo(p),d=daysIn(p),btn=(attr,t)=>`<button type="button" ${attr}>${t}</button>`;
