@@ -18,6 +18,8 @@ if (!username || !password || !sessionSecret) {
 }
 
 const indexHtml = await readFile(join(__dirname, 'index.html'));
+// Logo oficial de Ruano (va incrustado en index.html); se usa en la revisión si la marca no tiene otro
+const DEFAULT_LOGO = (indexHtml.toString('utf8').match(/id="officialLogo" src="(data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+)"/) || [])[1] || '';
 
 // Datos persistentes: en producción /app/data es un volumen de Easypanel
 const dataDir = process.env.DATA_DIR || join(__dirname, 'data');
@@ -645,7 +647,7 @@ async function handleReview(req, res, url) {
         review: rv && rv.at >= (x.updatedAt || 0) ? rv : null, photo: prop ? `/api/review/${m[1]}/photo/${prop.id}` : null };
     });
   const b = data.brand;
-  return sendJson(res, 200, { brand: { name: b.name, color: b.color, color2: b.color2, logo: b.logo || '' }, items });
+  return sendJson(res, 200, { brand: { name: b.name, color: b.color, color2: b.color2, logo: b.logo || (b.id === 'ruano' ? DEFAULT_LOGO : '') }, items });
 }
 const reviewPage = () => `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
