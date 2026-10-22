@@ -559,6 +559,22 @@ async function handleApi(req, res, url, user) {
     const ch = notifyChannels(b);
     return sendJson(res, 200, { email: ch.email ? ch.email.replace(/^(.).*(@.*)$/, '$1•••$2') : '', telegram: !!ch.telegram, smtp: !!mailer, telegramBot: !!process.env.TELEGRAM_BOT_TOKEN });
   }
+  // Conectar Telegram sin buscar números: el usuario escribe al bot y aquí se lee su chat
+  if (url.pathname === '/api/notify/telegram-detect' && req.method === 'POST') {
+    const id = brandParam();
+    if (!id) return deny();
+    if (!process.env.TELEGRAM_BOT_TOKEN) return sendJson(res, 400, { error: 'Falta TELEGRAM_BOT_TOKEN en el servidor' });
+    try {
+      const api = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+      const me = await (await fetch(`${api}/getMe`)).json();
+      const up = await (await fetch(`${api}/getUpdates?limit=50&allowed_updates=${encodeURIComponent('["message","my_chat_member"]')}`)).json();
+      if (!up.ok) return sendJson(res, 502, { error: up.description || 'Telegram no responde' });
+      const chats = (up.result || []).map(u => u.message?.chat || u.my_chat_member?.chat).filter(Boolean);
+      const chat = chats.at(-1);
+      if (!chat) return sendJson(res, 404, { error: `Abre Telegram, busca @${me.result?.username || 'tu bot'}, pulsa «Iniciar» (o escríbele «hola») y vuelve a pulsar este botón.`, bot: me.result?.username || '' });
+      return sendJson(res, 200, { chatId: String(chat.id), name: chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username || '', bot: me.result?.username || '' });
+    } catch (err) { return sendJson(res, 502, { error: err.message }); }
+  }
   if (url.pathname === '/api/notify/test' && req.method === 'POST') {
     const id = brandParam();
     if (!id) return deny();
