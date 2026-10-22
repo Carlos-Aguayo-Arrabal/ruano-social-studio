@@ -1696,7 +1696,7 @@ const server = http.createServer(async (req, res) => {
       const secure = isProduction ? '; Secure' : '';
       res.writeHead(303, {
         Location: '/',
-        'Set-Cookie': `ruano_session=${encodeURIComponent(createSession(user))}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure}`,
+        'Set-Cookie': `ruano_session=${encodeURIComponent(createSession(user))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${secure}`,
       });
       return res.end();
     } catch {
@@ -1707,7 +1707,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/logout') {
     res.writeHead(303, {
       Location: '/login',
-      'Set-Cookie': 'ruano_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0',
+      'Set-Cookie': 'ruano_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0',
     });
     return res.end();
   }
