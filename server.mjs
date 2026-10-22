@@ -1239,6 +1239,15 @@ async function waitContainer(id, token) {
   }
   throw new Error('Meta tarda demasiado en procesar el vídeo');
 }
+// Mismo criterio que la app: solo el texto publicable
+function publishCaption(item){const lines=String(item.caption||'').replace(/\r/g,'').split('\n');
+ const tagIdx=lines.findIndex(l=>/^\s*(#[^\s#]+\s*)+$/.test(l)),tags=tagIdx>=0?lines.slice(tagIdx).filter(l=>/#/.test(l)).join(' ').trim():'',body=(tagIdx>=0?lines.slice(0,tagIdx):lines).join('\n');
+ let out=body;const m=body.match(/(?:^|\n)\s*Texto:\s*([\s\S]*)$/i);
+ if(m)out=m[1];else if(/^\s*(Gancho|Guion):/im.test(body)){const g=body.match(/Gancho:\s*(.+)/i)||body.match(/Guion:\s*(.+)/i);out=(g?g[1]:'')+(item.propertyRef?`\n\nREF. ${item.propertyRef} · Pide información por mensaje`:'')}
+ out=out.replace(/\n\s*Diapositivas:[\s\S]*$/i,'').replace(/^\s*(Portada|Cierre):\s*/gim,'');
+ if(item.type==='Historia')out=out.replace(/^\s*\d+\.\s*/gm,'');
+ if(item.propertyRef&&item.type!=='Historia'&&!/\bREF\.\s*\S/i.test(out))out+=`\n\n📩 Pide información o visita · REF. ${item.propertyRef}`;
+ out=out.replace(/\n{3,}/g,'\n\n').trim();return tags?`${out}\n\n${tags}`:out}
 const publishing = new Set();
 async function publishItem(brandId, item) {
   const key = `${brandId}:${item.id}`;
@@ -1252,7 +1261,7 @@ async function publishItem(brandId, item) {
     await updateItem(brandId, item.id, { metaStatus: 'publishing', metaError: '' });
     const urls = media.map(m => ({ ...m, url: publicMediaUrl(brandId, String(item.id), m.file) }));
     const images = urls.filter(m => m.type === 'image'), video = urls.find(m => m.type === 'video');
-    const caption = String(item.caption || '').slice(0, 2200), ch = String(item.channel || ''), links = {};
+    const caption = publishCaption(item).slice(0, 2200), ch = String(item.channel || ''), links = {};
     const toIG = /instagram/i.test(ch) && page.igId, toFB = /facebook/i.test(ch) || (!toIG && !/instagram/i.test(ch));
     if (/instagram/i.test(ch) && !page.igId) throw new Error('La página de Facebook conectada no tiene una cuenta de Instagram profesional vinculada');
     if (toIG) {
