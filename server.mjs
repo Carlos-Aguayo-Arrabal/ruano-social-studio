@@ -1248,6 +1248,49 @@ function publishCaption(item){const lines=String(item.caption||'').replace(/\r/g
  if(item.type==='Historia')out=out.replace(/^\s*\d+\.\s*/gm,'');
  if(item.propertyRef&&item.type!=='Historia'&&!/\bREF\.\s*\S/i.test(out))out+=`\n\n📩 Pide información o visita · REF. ${item.propertyRef}`;
  out=out.replace(/\n{3,}/g,'\n\n').trim();return tags?`${out}\n\n${tags}`:out}
+// Puntos clave para redes a partir de la ficha y la descripción del portal (sin el texto legal ni de impuestos)
+function featureBullets(p){const raw=[p.description,p.extras,p.other].filter(Boolean).join(' '),d=raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''),out=[],add=t=>{if(out.length<7&&!out.includes(t))out.push(t)};
+ const has=r=>r.test(d),acc=has(/movilidad reducida|accesib|adaptad/);
+ const facts=[p.built,p.beds,p.baths].filter(Boolean).join(' · ');if(facts)add('📐 '+facts);
+ // Por orden de importancia para quien busca vivienda
+ if(has(/a estrenar/)&&has(/reformad/))add('✨ A estrenar, totalmente reformado');else if(has(/a estrenar/))add('✨ A estrenar');else if(has(/totalmente reformad/))add('✨ Totalmente reformado');else if(has(/reformad/))add('✨ Reformado');
+ {const t=d.match(/terraza(?: de)? (\d+) ?m/);if(has(/terraza/))add('🌿 Terraza'+(t?` de ${t[1]} m²`:''))}
+ if(has(/piscina/))add('🏊 Piscina');if(has(/vistas al mar/))add('🌊 Vistas al mar');else if(has(/playa/))add('🏖️ Cerca de la playa');
+ if(has(/garaje|plaza de aparcamiento|plaza de parking/))add('🚗 Plaza de garaje');if(has(/jardin/))add('🌳 Jardín');if(has(/trastero/))add('📦 Trastero');
+ if(has(/ascensor/))add('🛗 Edificio con ascensor'+(acc?' y acceso adaptado':''));else if(acc)add('♿ Acceso adaptado');
+ if(has(/amueblad/))add('🛋️ Se entrega amueblado'+(has(/entrar a vivir/)?', listo para entrar a vivir':''));else if(has(/entrar a vivir/))add('🔑 Listo para entrar a vivir');
+ if(has(/cocina americana/))add('🍳 Cocina americana equipada'+(has(/lavavajillas/)?' con lavavajillas':''));else if(has(/cocina (independiente|amueblada|equipada)/))add('🍳 Cocina equipada');
+ if(has(/aire acondicionado|climatizacion/))add('❄️ Aire acondicionado'+(has(/calefaccion/)?' y calefacción':''));else if(has(/calefaccion/))add('🔥 Calefacción');
+ {const o=d.match(/orientacion (sureste|suroeste|noreste|noroeste|sur|norte|este|oeste)/);if(o)add(`☀️ Orientación ${o[1]}${has(/luminos/)?', muy luminoso':''}`);else if(has(/luminos/))add('☀️ Muy luminoso')}
+ if(has(/climalit|doble acristalamiento/))add('🪟 Ventanas'+(has(/pvc/)?' de PVC':'')+' con climalit');
+ if(has(/puerta (de seguridad|blindada|acorazada)/))add('🔒 Puerta de seguridad');if(has(/armarios empotrados/))add('🚪 Armarios empotrados');
+ return out}
+function captionFor(item,net,ctx={}){let t=publishCaption(item);const lines=t.split('\n'),tagIdx=lines.findIndex(l=>/^\s*(#[^\s#]+\s*)+$/.test(l));
+ let tags=tagIdx>=0?lines.slice(tagIdx).join(' ').match(/#[^\s#]+/g)||[]:[],body=(tagIdx>=0?lines.slice(0,tagIdx):lines).join('\n').trim();
+ const ACR=/^(REF|IBI|WIFI|DM|URL|GPS)$/;
+ // Palabras en MAYÚSCULAS (de WITEI) a minúscula: en redes parecen gritos
+ body=body.replace(/\b[A-ZÁÉÍÓÚÜÑ]{5,}\b/g,w=>ACR.test(w)?w:w.toLowerCase()).replace(/(^|[.!?]\s+|\n)([a-záéíóúüñ])/g,(m,a,b)=>a+b.toUpperCase());
+ const p=ctx.prop,city=p?String(p.location||'').split(',').map(x=>x.trim()).filter(Boolean):[];
+ if(p&&item.type!=='Historia'&&(!item.campaign||item.campaign==='nuevo')&&p.description){const bullets=featureBullets(p);if(bullets.length>=3){
+  const first=body.split('\n').find(l=>l.trim())||String(p.title||'');
+  const norm=x=>String(x).toLowerCase().replace(/[^a-záéíóúüñ0-9]+/g,' ').trim(),plain=norm(first.replace(/^\p{Extended_Pictographic}\s*/u,''));
+  const intro=String(p.description).split(/\n+/).map(x=>x.trim()).filter(x=>x&&norm(x)!==plain&&norm(x)!==norm(p.title||'')).join(' ').replace(/\s+/g,' ').match(/[^.!?]{25,180}[.!?]/g)?.map(x=>x.trim()).find(x=>!/precio|itp|notar|registr|impuesto|€/i.test(x))||'';
+  const story=item.type==='Carrusel'?'\n\n👉 Desliza para ver todas las fotos':item.type==='Reel'?'':'';
+  body=`${first}\n\n${intro?intro.replace(/\b[A-ZÁÉÍÓÚÜÑ]{5,}\b/g,w=>w.toLowerCase())+'\n\n':''}${bullets.join('\n')}${story}`}}
+ if(p&&item.type!=='Historia'){const bl=body.split('\n');let i=bl.findIndex(l=>l.trim());if(i>=0){let h=bl[i].trim().replace(/[.,;:]+$/,'');
+  // Primera línea con lo que se busca: tipo, zona y precio (es lo que se ve antes de «más»)
+  if(city[0]&&!h.toLowerCase().includes(city[0].toLowerCase()))h+=` en ${city[0]}`;{const c=city.at(-1);if(c&&c!==city[0]&&!h.toLowerCase().includes(c.toLowerCase()))h+=` · ${c}`}if(p.price&&!body.includes(p.price)&&!['reservado','vendido'].includes(p.stamp))h+=` · ${p.price}`;
+  if(!/^\p{Extended_Pictographic}/u.test(h))h=(p.operation==='Alquiler'?'🔑 ':'🏡 ')+h;bl[i]=h;body=bl.join('\n')}}
+ const ref=item.propertyRef?` · REF. ${item.propertyRef}`:'';
+ body=body.replace(/\n*📩 Pide información o visita · REF\. [^\n]*$/,'');
+ if(net==='instagram'){body=body.replace(/https?:\/\/\S+/g,'el enlace de la bio');
+  const hasRef=/\bREF\.\s*\S/.test(body);if(item.type!=='Historia'&&!/bio|mensaje|privado|dm\b/i.test(body))body+=`\n\n📩 Escríbenos por mensaje o pide tu visita en el enlace de la bio${hasRef?'':ref}`;else if(ref&&!/\bREF\.\s*\S/.test(body)&&item.type!=='Historia')body+=`\n\n📩 Pide información${ref}`}
+ else{body=body.replace(/(en el |el )?enlace (de|en) la bio/gi,ctx.webUrl?'este enlace':'nuestra web');if(item.type!=='Historia'){if(ctx.webUrl)body+=`\n\n👉 Más fotos y pide tu visita${/\bREF\.\s*\S/.test(body)?'':ref}: ${ctx.webUrl}`;else if(ref&&!/\bREF\.\s*\S/.test(body))body+=`\n\n📩 Escríbenos para más información${ref}`}}
+ // Hashtags: los más útiles primero (tipo + zona, zona, operación, marca); 5 en Instagram, 3 en Facebook
+ const brandT=(ctx.tags||[]).map(x=>'#'+String(x).replace(/^#/,'').toLowerCase()),zones=city.map(c=>c.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,'').toLowerCase());
+ const score=h=>{const l=h.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');return(/en(venta|alquiler)|(piso|casa|chalet|atico|duplex|apartamento|vivienda|local|nave|terreno)en/.test(l)?4:0)+(zones.some(z=>z&&l.includes(z))?3:0)+(brandT.includes(l)?2:0)};
+ tags=[...new Set(tags.map(h=>h.trim()))].map((h,i)=>({h,i,s:score(h)})).sort((a,b)=>b.s-a.s||a.i-b.i).slice(0,net==='instagram'?5:3).map(x=>x.h);{const own=[...new Set((tagIdx>=0?lines.slice(tagIdx).join(' ').match(/#[^\s#]+/g):[])||[])].find(h=>brandT.includes(h.toLowerCase()));if(own&&!tags.includes(own))tags[tags.length-1]=own}
+ body=body.replace(/\n{3,}/g,'\n\n').trim().slice(0,2100);return tags.length?`${body}\n\n${tags.join(' ')}`:body}
 const publishing = new Set();
 async function publishItem(brandId, item) {
   const key = `${brandId}:${item.id}`;
@@ -1261,7 +1304,9 @@ async function publishItem(brandId, item) {
     await updateItem(brandId, item.id, { metaStatus: 'publishing', metaError: '' });
     const urls = media.map(m => ({ ...m, url: publicMediaUrl(brandId, String(item.id), m.file) }));
     const images = urls.filter(m => m.type === 'image'), video = urls.find(m => m.type === 'video');
-    const caption = publishCaption(item).slice(0, 2200), ch = String(item.channel || ''), links = {};
+    const st0 = await readStore(), brand = st0.brands.find(b => b.id === brandId) || {}, prop = (brandDataOf(st0, brandId).properties || []).find(x => String(x.reference) === String(item.propertyRef)) || null;
+    const ctx = { tags: String(brand.tags || '').split(/[\s,#]+/).filter(Boolean), prop, webUrl: prop && brand.webId && prop.web !== false ? `${PUBLIC_URL}/w/${brand.webId}/${prop.id}` : '' };
+    const caption = captionFor(item, 'instagram', ctx), captionFb = captionFor(item, 'facebook', ctx), ch = String(item.channel || ''), links = {};
     const toIG = /instagram/i.test(ch) && page.igId, toFB = /facebook/i.test(ch) || (!toIG && !/instagram/i.test(ch));
     if (/instagram/i.test(ch) && !page.igId) throw new Error('La página de Facebook conectada no tiene una cuenta de Instagram profesional vinculada');
     if (toIG) {
@@ -1291,12 +1336,12 @@ async function publishItem(brandId, item) {
       }
     }
     if (toFB && item.type !== 'Historia') {
-      if (video) links.facebook = (await graph('POST', `${page.id}/videos`, { file_url: video.url, description: caption, access_token: token })).id;
+      if (video) links.facebook = (await graph('POST', `${page.id}/videos`, { file_url: video.url, description: captionFb, access_token: token })).id;
       else if (images.length > 1) {
         const ids = [];
         for (const m of images.slice(0, 10)) ids.push((await graph('POST', `${page.id}/photos`, { url: m.url, published: 'false', access_token: token })).id);
-        links.facebook = (await graph('POST', `${page.id}/feed`, { message: caption, attached_media: ids.map(id => ({ media_fbid: id })), access_token: token })).id;
-      } else links.facebook = (await graph('POST', `${page.id}/photos`, { url: images[0].url, message: caption, access_token: token })).post_id || null;
+        links.facebook = (await graph('POST', `${page.id}/feed`, { message: captionFb, attached_media: ids.map(id => ({ media_fbid: id })), access_token: token })).id;
+      } else links.facebook = (await graph('POST', `${page.id}/photos`, { url: images[0].url, message: captionFb, access_token: token })).post_id || null;
     }
     // Comprobación: se pide a Meta el enlace de cada publicación para confirmar que existe
     const permalinks = {};
