@@ -575,6 +575,17 @@ async function handleApi(req, res, url, user) {
       return sendJson(res, 200, { chatId: String(chat.id), name: chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username || '', bot: me.result?.username || '' });
     } catch (err) { return sendJson(res, 502, { error: err.message }); }
   }
+  if (url.pathname === '/api/report' && req.method === 'GET') {
+    const id = brandParam();
+    if (!id) return deny();
+    return sendJson(res, 200, { text: await weeklyReport(id, originOf(req)) });
+  }
+  if (url.pathname === '/api/report/send' && req.method === 'POST') {
+    const id = brandParam();
+    if (!id) return deny();
+    try { await sendWeeklyReport(id, originOf(req)); return sendJson(res, 200, { ok: true }); }
+    catch (err) { return sendJson(res, 400, { error: err.message }); }
+  }
   if (url.pathname === '/api/notify/test' && req.method === 'POST') {
     const id = brandParam();
     if (!id) return deny();
@@ -1354,6 +1365,81 @@ async function handleGdrive(req, res, url, user) {
   }
   return sendJson(res, 404, { error: 'No encontrado' });
 }
+
+
+// ═══ Informe semanal (lunes 9:00, hora de Madrid) por Telegram y/o email ═══
+const reportsFile = join(dataDir, 'reports.json');
+const madridNow = () => Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', hourCycle: 'h23', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' }).formatToParts(new Date()).map(x => [x.type, x.value]));
+const isoAdd = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const fmtDay = (iso, opts) => new Intl.DateTimeFormat('es-ES', { timeZone: 'UTC', ...opts }).format(new Date(`${iso}T12:00:00Z`));
+const plur = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+async function weeklyReport(brandId, origin = PUBLIC_URL) {
+  await flushStats().catch(() => {});
+  const st = await readStore(), brand = st.brands.find(b => b.id === brandId) || { name: brandId }, d = brandDataOf(st, brandId);
+  const content = d.content || [], props = d.properties || [];
+  const now = madridNow(), today = `${now.year}-${now.month}-${now.day}`;
+  const lastMon = isoAdd(today, -7), lastSun = isoAdd(today, -1), prevMon = isoAdd(today, -14), thisMon = today, nextSun = isoAdd(today, 6); // los 7 días anteriores (el lunes, la semana pasada) y los 7 siguientes
+  const inRange = (iso, a, b) => iso && iso >= a && iso <= b;
+  const fromMs = madridToMs(lastMon, '00:00'), toMs = madridToMs(today, '00:00');
+  const pub = content.filter(x => x.status === 'published' && (x.publishedAt ? x.publishedAt >= fromMs && x.publishedAt < toMs : inRange(x.date, lastMon, lastSun)));
+  const byType = {}; pub.forEach(x => { byType[x.type] = (byType[x.type] || 0) + 1; });
+  const stats = await readStats(brandId), sum = (a, b) => { const o = { views: 0, wa: 0, tel: 0, form: 0, web: 0, byProp: {} }; for (const [day, v] of Object.entries(stats.days || {})) { if (!inRange(day, a, b)) continue; for (const [k, n] of Object.entries(v.views || {})) { o.views += n; if (k !== 'bio') o.byProp[k] = (o.byProp[k] || 0) + n; } for (const [k, n] of Object.entries(v.clicks || {})) { const kind = k.split(':')[0]; if (kind in o) o[kind] += n; } } return o; };
+  const w = sum(lastMon, lastSun), pw = sum(prevMon, isoAdd(lastMon, -1));
+  const trend = pw.views ? ` (${w.views >= pw.views ? '+' : ''}${Math.round((w.views - pw.views) / pw.views * 100)} % que los 7 días anteriores)` : '';
+  const top = Object.entries(w.byProp).sort((a, b) => b[1] - a[1])[0], topP = top && props.find(p => String(p.id) === top[0]);
+  const leads = (await readLeads(brandId)).filter(l => l.at >= fromMs && l.at < toMs);
+  const week = content.filter(x => x.status !== 'published' && inRange(x.date, thisMon, nextSun)).sort((a, b) => String(a.date).localeCompare(b.date));
+  const late = content.filter(x => ['approved', 'scheduled'].includes(x.status) && x.date && x.date < today);
+  const pending = content.filter(x => x.status === 'pending');
+  const closedW = props.filter(p => (p.soldAt >= fromMs && p.soldAt < toMs) || (p.reservedAt >= fromMs && p.reservedAt < toMs));
+  const avail = props.filter(p => !['reservado', 'vendido'].includes(p.stamp));
+  // Propuesta: el disponible que más tiempo lleva sin salir en redes
+  const pick = avail.filter(p => p.web !== false).map(p => { const past = content.filter(x => String(x.propertyRef) === String(p.reference) && x.date && x.date <= today).map(x => x.date).sort().at(-1); return { p, days: past ? Math.round((new Date(today) - new Date(past)) / 864e5) : null }; })
+    .sort((a, b) => (b.days == null ? 1e9 : b.days) - (a.days == null ? 1e9 : a.days))[0];
+  const title = p => { const t = String(p.title || '').trim(), up = t.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length, low = t.replace(/[^a-záéíóúñ]/g, '').length; return up > low ? t.toLowerCase().replace(/^./, c => c.toUpperCase()) : t; };
+  const L = [`📊 Informe semanal · ${brand.name}`, `Del ${fmtDay(lastMon, { day: 'numeric', month: 'short' })} al ${fmtDay(lastSun, { day: 'numeric', month: 'short' })}`, ''];
+  L.push(`✅ Publicado: ${pub.length ? `${pub.length} (${Object.entries(byType).map(([t, n]) => `${n} ${t.toLowerCase()}`).join(', ')})` : 'nada en estos días'}`);
+  L.push(`👁 Visitas a tus fichas: ${w.views}${trend}`);
+  L.push(`📲 Clics de contacto: ${w.wa + w.tel + w.form} (WhatsApp ${w.wa}, llamadas ${w.tel}, formulario ${w.form})`);
+  if (topP) L.push(`🏆 Lo más visto: REF. ${topP.reference} · ${title(topP)} (${plur(top[1], 'visita', 'visitas')})`);
+  L.push(`☎ Contactos recibidos: ${leads.length}${leads.length ? ' → ' + leads.slice(0, 5).map(l => `${String(l.name || '').split(' ')[0]} (${l.ref ? 'REF. ' + l.ref : 'bio'})`).join(', ') : ''}`);
+  if (closedW.length) L.push(`🔑 Cerrados: ${closedW.map(p => `REF. ${p.reference} ${p.stamp === 'vendido' ? (p.operation === 'Alquiler' ? 'alquilado' : 'vendido') : 'reservado'}`).join(', ')}`);
+  L.push('', `📅 Próximos 7 días (${fmtDay(thisMon, { day: 'numeric', month: 'short' })} – ${fmtDay(nextSun, { day: 'numeric', month: 'short' })}): ${week.length ? plur(week.length, 'contenido', 'contenidos') : 'no hay nada previsto'}`);
+  week.slice(0, 8).forEach(x => L.push(`• ${fmtDay(x.date, { weekday: 'short', day: 'numeric' })} · ${x.type}${x.propertyRef ? ' · REF. ' + x.propertyRef : ''}${x.status === 'pending' ? ' (sin revisar)' : ''}`));
+  if (week.length > 8) L.push(`• y ${week.length - 8} más`);
+  if (late.length) L.push(`⚠ Atrasados sin publicar: ${late.length}`);
+  if (pending.length) L.push(`✍ Pendientes de revisar: ${pending.length}`);
+  L.push(`🏠 Cartera: ${plur(avail.length, 'inmueble disponible', 'inmuebles disponibles')}`);
+  if (pick) L.push('', `💡 Propuesta: destaca la REF. ${pick.p.reference} · ${title(pick.p)} (${pick.days == null ? 'aún no ha salido en redes' : `lleva ${plur(pick.days, 'día', 'días')} sin salir en redes`})`);
+  L.push('', `👉 Abrir la app: ${origin}/`);
+  return L.join('\n');
+}
+async function sendWeeklyReport(brandId, origin) {
+  const st = await readStore(), brand = st.brands.find(b => b.id === brandId);
+  if (!brand) throw new Error('Empresa no válida');
+  const ch = notifyChannels(brand);
+  if (!ch.email && !ch.telegram) throw new Error('No hay Telegram ni email configurado para esta empresa');
+  const text = await weeklyReport(brandId, origin), jobs = [];
+  if (ch.telegram) jobs.push(fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: ch.telegram, text, disable_web_page_preview: true }) }).then(async r => { if (!r.ok) throw new Error(`Telegram ${r.status}: ${(await r.json().catch(() => ({}))).description || ''}`); }));
+  if (ch.email) jobs.push(mailer.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to: ch.email, subject: `📊 Informe semanal · ${brand.name}`, text }));
+  const out = await Promise.allSettled(jobs), bad = out.filter(o => o.status === 'rejected');
+  if (bad.length === out.length) throw new Error(bad[0].reason?.message || 'No se pudo enviar');
+  return text;
+}
+async function reportsTick() {
+  const now = madridNow();
+  if (now.weekday !== 'Mon' || Number(now.hour) < 9) return;
+  const key = `${now.year}-${now.month}-${now.day}`;
+  let sent = {}; try { sent = JSON.parse(await readFile(reportsFile, 'utf8')); } catch {}
+  for (const b of (await readStore()).brands) {
+    if (sent[b.id] === key) continue;
+    const ch = notifyChannels(b); if (!ch.telegram && !ch.email) continue;
+    try { await sendWeeklyReport(b.id); sent[b.id] = key; } catch (err) { console.error('Informe semanal', b.id, err.message); }
+  }
+  await writeAtomic(reportsFile, JSON.stringify(sent));
+}
+setTimeout(() => reportsTick().catch(() => {}), 90_000).unref();
+setInterval(() => reportsTick().catch(() => {}), 15 * 60_000).unref();
 
 
 // ═══ Meta (Instagram y Facebook): conexión, medios de cada publicación, publicar y programar ═══
