@@ -146,6 +146,7 @@
           <p class="form-hint">Usa tus fotos en el orden de la galería, con sus ajustes, zoom suave y fundidos. Al principio muestra título y precio; al final, la referencia y el contacto. Sin música: añádela en Instagram al publicar (así puedes usar audios en tendencia).</p>
           <div class="form-row"><label>Fotos a usar<select id="reelCount"></select></label><label>Segundos por foto<select id="reelSeconds"><option value="3">3 s · dinámico</option><option value="3.5" selected>3,5 s · recomendado</option><option value="4.5">4,5 s · pausado</option><option value="5.5">5,5 s · lujo / alto standing</option></select></label></div>
           <div class="toggle-row"><div><strong>Color automático</strong><small>Iguala tonos y aclara las fotos oscuras en el vídeo</small></div><label class="switch"><input id="reelAuto" type="checkbox" checked><span></span></label></div>
+          <div class="toggle-row"><div><strong>Encabezado y pie corporativos</strong><small>Franja con el logo arriba y web, teléfono y referencia abajo, como en las fotos</small></div><label class="switch"><input id="reelFrame" type="checkbox" checked><span></span></label></div>
           <div class="toggle-row"><div><strong>Mostrar precio</strong><small>En la portada y en la etiqueta de la referencia</small></div><label class="switch"><input id="reelPrice" type="checkbox" checked><span></span></label></div>
           <p class="reel-total" id="reelTotal"></p>
           <div class="modal-actions"><button type="button" class="secondary-button" data-close-reel>Cancelar</button><button type="button" class="primary-button" id="reelGenerate">🎬 Generar reel</button></div>
@@ -845,14 +846,24 @@ function reelOutroBg(pl){const c=document.createElement('canvas');c.width=REEL_W
  x.fillStyle=hexA(BRAND.color,.82);x.fillRect(0,0,REEL_W,REEL_H);return c}
 function splitContact(c){const m=String(c).match(/\+?\d[\d\s.]{7,}\d/),phone=m?m[0].replace(/\s+/g,' ').trim():'',web=String(c).replace(m?m[0]:'','').replace(/[·|,\s]+$/,'').replace(/^[·|,\s]+/,'').replace(/\s*·\s*$/,'').trim();return{phone,web}}
 // Zonas seguras de Instagram: nada importante en los ~250 px de arriba ni en los ~650 px de abajo
+// Encabezado blanco con logo y lema, y pie con web, teléfono y referencia (igual que en las fotos)
+function drawReelBands(x,f){const W=REEL_W,H=REEL_H;x.save();x.globalAlpha=1;
+ x.fillStyle='#fff';x.fillRect(0,0,W,f.head);x.fillStyle='rgba(5,20,40,.08)';x.fillRect(0,f.head-3,W,3);
+ const logo=document.querySelector('#officialLogo');if(logo?.naturalWidth){const lh=f.head*.7,lw=Math.min(lh*logo.naturalWidth/logo.naturalHeight,W*.45);x.drawImage(logo,56,(f.head-lh)/2,lw,lh)}
+ x.textAlign='right';x.fillStyle=BRAND.color;x.font="700 34px 'DM Sans',Arial";x.fillText(BRAND.slogan||'',W-56,f.head*.47);
+ x.fillStyle='#64758a';x.font="500 28px 'DM Sans',Arial";x.fillText(BRAND.subline||'',W-56,f.head*.68);
+ const y=H-f.foot;x.fillStyle=BRAND.color;x.fillRect(0,y,W,f.foot);x.fillStyle='#fff';x.textBaseline='middle';
+ x.textAlign='left';x.font="600 34px 'DM Sans',Arial";let txt=f.footer;while(txt&&x.measureText(txt).width>W*(f.ref?.62:.86))txt=txt.slice(0,-1);x.fillText(txt,56,y+f.foot/2);
+ if(f.ref){x.textAlign='right';x.font="700 34px 'DM Sans',Arial";x.fillText(f.ref,W-56,y+f.foot/2)}
+ x.restore()}
 function drawReelFrame(x,t,r){const {plates,D,n,info}=r,total=n*D+REEL_OUTRO,photoEnd=n*D;x.clearRect(0,0,REEL_W,REEL_H);
  const F=Math.min(REEL_FADE,D*.4),span=k=>{const a=k*D-(k?F:0),b=(k+1)*D+(k===n-1?F:0);return[a,b]},prog=(k,tm)=>{const[a,b]=span(k);return clamp01((tm-a)/(b-a))};
  if(t<photoEnd+F){const tt=Math.min(t,photoEnd-.001),i=Math.floor(tt/D),local=tt-i*D;
   drawPlate(x,plates[i],i,prog(i,t),1);
   if(i<n-1&&local>D-F){const q=(local-(D-F))/F;drawPlate(x,plates[i+1],i+1,prog(i+1,t),ease(q))}
-  let g=x.createLinearGradient(0,0,0,480);g.addColorStop(0,'rgba(5,20,40,.5)');g.addColorStop(1,'rgba(5,20,40,0)');x.fillStyle=g;x.fillRect(0,0,REEL_W,480);
+  const gy=r.frame?r.frame.head:0;let g=x.createLinearGradient(0,gy,0,gy+420);g.addColorStop(0,'rgba(5,20,40,.45)');g.addColorStop(1,'rgba(5,20,40,0)');x.fillStyle=g;x.fillRect(0,gy,REEL_W,420);
   g=x.createLinearGradient(0,REEL_H*.55,0,REEL_H);g.addColorStop(0,'rgba(5,20,40,0)');g.addColorStop(1,'rgba(5,20,40,.5)');x.fillStyle=g;x.fillRect(0,REEL_H*.55,REEL_W,REEL_H*.45);
-  const logo=document.querySelector('#officialLogo');if(logo?.naturalWidth){const lh=120,lw=lh*logo.naturalWidth/logo.naturalHeight;x.fillStyle='rgba(255,255,255,.95)';reelRound(x,60,250,lw+40,lh+28,22);x.fill();x.drawImage(logo,80,264,lw,lh)}
+  const logo=document.querySelector('#officialLogo');if(!r.frame&&logo?.naturalWidth){const lh=120,lw=lh*logo.naturalWidth/logo.naturalHeight;x.fillStyle='rgba(255,255,255,.95)';reelRound(x,60,250,lw+40,lh+28,22);x.fill();x.drawImage(logo,80,264,lw,lh)}
   // Portada: bloque de texto con fondo oscuro propio para que se lea sobre cualquier foto
   const introA=t<D?clamp01(t/.5)*clamp01((D-F*.5-t)/.6):0;
   if(introA>0){const up=(1-ease(clamp01(t/.6)))*40;x.font="700 76px 'Playfair Display',Georgia,serif";let lines=reelWrap(x,info.title,REEL_W-140);
@@ -874,7 +885,7 @@ function drawReelFrame(x,t,r){const {plates,D,n,info}=r,total=n*D+REEL_OUTRO,pho
  // Cierre: foto desenfocada, entrada escalonada y llamada a la acción con latido suave
  if(t>=photoEnd){const ot=t-photoEnd,a=ease(clamp01(ot/F)),st=k=>ease(clamp01((ot-.35-k*.2)/.6)),{phone,web}=splitContact(info.contact);
   x.globalAlpha=a;x.drawImage(r.outroBg,0,0);x.globalAlpha=1;x.textAlign='center';
-  const logo=document.querySelector('#officialLogo');if(logo?.naturalWidth){const e=st(0),lh=190,lw=lh*logo.naturalWidth/logo.naturalHeight;x.globalAlpha=e;x.fillStyle='#fff';reelRound(x,(REEL_W-lw)/2-46,300+(1-e)*30,lw+92,lh+56,34);x.fill();x.drawImage(logo,(REEL_W-lw)/2,328+(1-e)*30,lw,lh)}
+  const logo=document.querySelector('#officialLogo');if(!r.frame&&logo?.naturalWidth){const e=st(0),lh=190,lw=lh*logo.naturalWidth/logo.naturalHeight;x.globalAlpha=e;x.fillStyle='#fff';reelRound(x,(REEL_W-lw)/2-46,300+(1-e)*30,lw+92,lh+56,34);x.fill();x.drawImage(logo,(REEL_W-lw)/2,328+(1-e)*30,lw,lh)}
   let e=st(1);x.globalAlpha=e;x.fillStyle='#fff';x.font="700 88px 'Playfair Display',Georgia,serif";x.fillText('¿Te interesa?',REEL_W/2,680+(1-e)*30);
   e=st(2);x.globalAlpha=e;x.fillStyle='#bcd6f2';x.font="700 44px 'DM Sans',Arial";x.fillText(info.tag,REEL_W/2,760+(1-e)*30);
   e=st(3);x.globalAlpha=e;const pulse=1+.035*Math.sin(ot*Math.PI*2*1.1)*clamp01((ot-1)/.4);x.save();x.translate(REEL_W/2,868+(1-e)*30);x.scale(pulse,pulse);
@@ -882,7 +893,7 @@ function drawReelFrame(x,t,r){const {plates,D,n,info}=r,total=n*D+REEL_OUTRO,pho
   e=st(4);x.globalAlpha=e;x.fillStyle='#fff';if(phone){x.font="500 38px 'DM Sans',Arial";x.fillText('Llámanos o escríbenos al',REEL_W/2,1005+(1-e)*30);x.font="800 76px 'DM Sans',Arial";x.fillText(phone,REEL_W/2,1090+(1-e)*30)}
   e=st(5);x.globalAlpha=e;x.font="500 42px 'DM Sans',Arial";x.fillStyle='rgba(255,255,255,.9)';x.fillText(web||info.contact,REEL_W/2,(phone?1165:1040)+(1-e)*30);x.font="500 34px 'DM Sans',Arial";x.fillStyle='#bcd6f2';x.fillText('o por mensaje directo',REEL_W/2,(phone?1220:1095)+(1-e)*30);
   x.globalAlpha=1;x.textAlign='left'}
- return total}
+ if(r.frame)drawReelBands(x,r.frame);return total}
 // Títulos de WITEI en MAYÚSCULAS → formato normal, conservando los nombres de la zona; sin repetir "en venta/alquiler"
 function niceTitle(t,p){t=String(t||'').trim();const letters=t.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g,'');
  if(letters&&letters.replace(/[^A-ZÁÉÍÓÚÜÑ]/g,'').length/letters.length>.7){const names=(p?.location||'').split(/[,\s]+/).filter(w=>w.length>2);t=t.toLowerCase().split(' ').map(w=>names.find(n=>n.toLowerCase()===w)||w).join(' ');t=t.charAt(0).toUpperCase()+t.slice(1)}
@@ -905,7 +916,7 @@ async function generateReel(){const mime=reelMime();if(!mime&&!canEncodeReel()){
  const c=document.createElement('canvas');c.width=REEL_W;c.height=REEL_H;screen.replaceChildren(c);const x=c.getContext('2d');
  try{await document.fonts?.ready;status.textContent='Preparando fotos…';const plates=[];
   for(let i=0;i<n;i++){plates.push(reelPlate(photoState.images[i],photoState.adjustments[i],document.querySelector('#reelAuto').checked));bar.style.width=`${(i+1)/n*15}%`;await new Promise(r=>setTimeout(r,0))}
-  const r={plates,D,n,info,outroBg:reelOutroBg(plates[0]),labels:photoState.adjustments.slice(0,n).map(a=>a?.label||'')},total=n*D+REEL_OUTRO;drawReelFrame(x,0,r);
+  const r={plates,D,n,info,frame:document.querySelector('#reelFrame').checked?{head:210,foot:150,footer:(document.querySelector('#footerText').value||BRAND.footer||'').trim(),ref:document.querySelector('#photoReference').value.trim().toUpperCase()}:null,outroBg:reelOutroBg(plates[0]),labels:photoState.adjustments.slice(0,n).map(a=>a?.label||'')},total=n*D+REEL_OUTRO;drawReelFrame(x,0,r);
   let blob=null;
   // Fotograma a fotograma a 30 fps exactos: sin saltos aunque el equipo vaya lento o se cambie de pestaña
   if(canEncodeReel()){try{status.textContent='Creando el reel…';blob=await encodeReel(c,x,r,total,k=>{bar.style.width=`${15+k*85}%`;status.textContent=`Creando el reel… ${Math.round(k*100)} %`})}catch(err){console.warn('Codificador no disponible, se graba en tiempo real',err);blob=null}}
