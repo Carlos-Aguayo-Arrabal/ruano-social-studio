@@ -565,7 +565,7 @@ const loginPage = (error = '') => `<!doctype html>
   <style>
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f7fa;color:#172438;font-family:Arial,sans-serif;padding:20px}
     main{width:min(420px,100%);background:#fff;border:1px solid #e2e8ef;border-radius:18px;padding:34px;box-shadow:0 18px 55px rgba(16,42,71,.1)}
-    .logo{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:#0b315f;color:#fff;font:700 30px Georgia;margin-bottom:22px}
+    .logo{width:58px;height:58px;border-radius:14px;display:grid;place-items:center;background:#fff;border:1px solid #dbe3ee;box-shadow:0 4px 14px rgba(11,49,95,.12);margin-bottom:22px}
     h1{font-family:Georgia,serif;color:#132d4d;margin:0 0 8px}p{color:#718095;font-size:14px;line-height:1.5}
     label{display:grid;gap:7px;margin-top:17px;font-size:13px;font-weight:700;color:#425168}
     input{width:100%;border:1px solid #d5dee7;border-radius:10px;padding:12px;font:inherit}
@@ -575,7 +575,7 @@ const loginPage = (error = '') => `<!doctype html>
   </style>
 </head>
 <body><main>
-  <div class="logo">M</div>
+  <div class="logo" title="Momentun Digital"><svg viewBox="0 0 48 48" width="38" height="38" aria-hidden="true"><path d="M8 36V14l11 13 11-13v22" fill="none" stroke="#0b315f" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 24l10-10" stroke="#2aa7a1" stroke-width="5" stroke-linecap="round"/><path d="M33 13h8v8" fill="none" stroke="#2aa7a1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
   <h1>Momentun Digital</h1>
   <p>Acceso privado al estudio de contenidos para redes sociales de inmobiliarias.</p>
   ${error ? '<div class="error">Usuario o contraseña incorrectos.</div>' : ''}
