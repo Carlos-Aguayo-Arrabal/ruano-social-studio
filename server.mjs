@@ -1,8 +1,9 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, unlink, copyFile, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink, copyFile, readdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
+import nodemailer from 'nodemailer';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -400,6 +401,27 @@ function sendJson(res, status, data) {
 
 async function handleApi(req, res, url) {
   // Contactos recibidos desde la web: listar, marcar como atendido o borrar
+  if (url.pathname === '/api/stats' && req.method === 'GET') {
+    const id = safeBrandId(url.searchParams.get('brand'));
+    if (!id) return sendJson(res, 400, { error: 'Empresa no válida' });
+    await flushStats();
+    return sendJson(res, 200, await readStats(id));
+  }
+  if (url.pathname === '/api/notify' && req.method === 'GET') {
+    const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
+    const b = parseJson(st.ruanoBrands, []).find(x => x && x.id === url.searchParams.get('brand')) || {};
+    const ch = notifyChannels(b);
+    return sendJson(res, 200, { email: ch.email ? ch.email.replace(/^(.).*(@.*)$/, '$1•••$2') : '', telegram: !!ch.telegram, smtp: !!mailer, telegramBot: !!process.env.TELEGRAM_BOT_TOKEN });
+  }
+  if (url.pathname === '/api/notify/test' && req.method === 'POST') {
+    const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
+    const b = parseJson(st.ruanoBrands, []).find(x => x && x.id === url.searchParams.get('brand'));
+    if (!b) return sendJson(res, 400, { error: 'Empresa no válida' });
+    const ch = notifyChannels(b);
+    if (!ch.email && !ch.telegram) return sendJson(res, 400, { error: 'No hay ningún aviso configurado todavía.' });
+    try { const out = await notifyLead(b, { name: 'Contacto de prueba', phone: '600 000 000', email: '', message: 'Esto es una prueba de los avisos de Momentun Digital Studio.', ref: '', title: '' }, originOf(req)); const bad = (out || []).filter(o => o.status === 'rejected').map(o => o.reason?.message); if (bad.length) return sendJson(res, 502, { error: bad.join(' · ') }); return sendJson(res, 200, { ok: true, email: !!ch.email, telegram: !!ch.telegram }); }
+    catch (err) { return sendJson(res, 502, { error: err.message }); }
+  }
   if (url.pathname === '/api/leads' && req.method === 'GET') {
     const id = safeBrandId(url.searchParams.get('brand'));
     return sendJson(res, id ? 200 : 400, id ? await readLeads(id) : { error: 'Empresa no válida' });
@@ -631,7 +653,7 @@ const loginPage = (error = '') => `<!doctype html>
   <div class="logo" title="Momentun Digital"><svg viewBox="0 0 48 48" width="38" height="38" aria-hidden="true"><path d="M8 36V14l11 13 11-13v22" fill="none" stroke="#0b315f" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 24l10-10" stroke="#2aa7a1" stroke-width="5" stroke-linecap="round"/><path d="M33 13h8v8" fill="none" stroke="#2aa7a1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
   <h1>Momentun Digital</h1>
   <p>Acceso privado al estudio de contenidos para redes sociales de inmobiliarias.</p>
-  ${error ? '<div class="error">Usuario o contraseña incorrectos.</div>' : ''}
+  ${error ? `<div class="error">${error === 'lock' ? 'Demasiados intentos fallidos. Espera 15 minutos y vuelve a intentarlo.' : 'Usuario o contraseña incorrectos.'}</div>` : ''}
   <form method="post" action="/login">
     <label>Usuario<input name="username" autocomplete="username" required autofocus></label>
     <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
@@ -659,6 +681,9 @@ async function brandByToken(token) {
   return { brand, content: parseJson(src.ruanoContent, []), properties: parseJson(src.ruanoProperties, []) };
 }
 const reviewHits = new Map();
+const loginFails = new Map();
+// Easypanel (Traefik) añade la IP real al FINAL de X-Forwarded-For; lo anterior lo puede escribir el propio visitante
+const clientIp = req => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',').pop().trim();
 async function handleReview(req, res, url) {
   const m = url.pathname.match(/^\/api\/review\/([a-f0-9]{24})(?:\/(photo\/(\d{1,20})|(\d{1,20})))?$/);
   if (!m) return sendJson(res, 404, { error: 'No encontrado' });
@@ -799,11 +824,11 @@ function publicProp(p) {
 }
 const originOf = req => `${String(req.headers['x-forwarded-proto'] || (isProduction ? 'https' : 'http')).split(',')[0]}://${req.headers['x-forwarded-host'] || req.headers.host}`;
 
-function webShell({ brand, title, desc, image, url, body, script = '' }) {
+function webShell({ brand, title, desc, image, url, body, script = '', head = '' }) {
   const c1 = hexColor(brand.color, '#0b315f'), c2 = hexColor(brand.color2, '#0d447f');
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escHtml(title)}</title><meta name="description" content="${escHtml(desc)}">
-<meta property="og:type" content="website"><meta property="og:title" content="${escHtml(title)}"><meta property="og:description" content="${escHtml(desc)}"><meta property="og:url" content="${escHtml(url)}">${image ? `<meta property="og:image" content="${escHtml(image)}"><meta name="twitter:card" content="summary_large_image">` : ''}
+<meta property="og:type" content="website"><meta property="og:title" content="${escHtml(title)}"><meta property="og:description" content="${escHtml(desc)}"><meta property="og:url" content="${escHtml(url)}">${image ? `<meta property="og:image" content="${escHtml(image)}"><meta name="twitter:card" content="summary_large_image">` : ''}<link rel="canonical" href="${escHtml(url)}">${head}
 <style>:root{--c:${c1};--c2:${c2};--ink:#16212e;--muted:#64748b;--line:#e3e8ef;--bg:#f4f6f9}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}a{color:inherit}
 .top{display:block;text-decoration:none;background:#fff;border-bottom:1px solid var(--line)}.top .in{max-width:880px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px;text-decoration:none}.logo{width:46px;height:46px;border-radius:10px;display:grid;place-items:center;overflow:hidden;background:var(--c);color:#fff;font:700 22px Georgia,serif;flex:none}.logo img{width:100%;height:100%;object-fit:contain;background:#fff}.top b{display:block;font-size:16px}.top small{color:var(--muted);font-size:12.5px}
 main{max-width:880px;margin:0 auto;padding:0 0 110px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;margin:14px 16px}
@@ -827,14 +852,15 @@ function leadForm(webId, propId, message, brand) {
 <label class="consent"><input type="checkbox" name="consent" required><span>Acepto que ${escHtml(brand.name)} use mis datos solo para responder a esta solicitud. No se ceden a terceros.${privacy}</span></label>
 <p class="err" id="leadErr" hidden></p><button class="btn" type="submit">Enviar solicitud</button></form>`;
 }
-const LEAD_SCRIPT = `const f=document.getElementById('lead');if(f)f.addEventListener('submit',async e=>{e.preventDefault();const b=f.querySelector('button'),er=document.getElementById('leadErr'),d=Object.fromEntries(new FormData(f));d.consent=!!f.elements.consent.checked;
+const LEAD_SCRIPT = `document.addEventListener('click',e=>{const a=e.target.closest('[data-hit]'),h=document.getElementById('hitctx');if(a&&h&&navigator.sendBeacon)navigator.sendBeacon('/api/hit/'+h.dataset.w,new Blob([JSON.stringify({k:a.dataset.hit,p:h.dataset.p})],{type:'text/plain'}))});
+const f=document.getElementById('lead');if(f)f.addEventListener('submit',async e=>{e.preventDefault();const b=f.querySelector('button'),er=document.getElementById('leadErr'),d=Object.fromEntries(new FormData(f));d.consent=!!f.elements.consent.checked;
 if(!d.phone&&!d.email){er.textContent='Indica un teléfono o un email para poder responderte.';er.hidden=false;return}
 b.disabled=true;er.hidden=true;try{const r=await fetch(f.dataset.api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'No se pudo enviar');
 f.outerHTML='<div class="ok"><b>¡Gracias!</b> Hemos recibido tu solicitud y te contactaremos lo antes posible.</div>'}catch(x){er.textContent=x.message;er.hidden=false;b.disabled=false}});`;
 
 function contactButtons(c, text) {
-  return [c.wa && `<a class="btn wa" href="https://wa.me/${c.wa}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a>`,
-    c.phone && `<a class="btn light" href="tel:${escHtml(c.phone)}">Llamar</a>`].filter(Boolean).join('');
+  return [c.wa && `<a class="btn wa" data-hit="wa" href="https://wa.me/${c.wa}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a>`,
+    c.phone && `<a class="btn light" data-hit="tel" href="tel:${escHtml(c.phone)}">Llamar</a>`].filter(Boolean).join('');
 }
 async function propertyPage(req, data, webId, p) {
   const b = data.brand, c = contactOf(b), x = publicProp(p), origin = originOf(req), url = `${origin}/w/${webId}/${x.id}`;
@@ -851,7 +877,12 @@ ${x.description ? `<p class="desc">${escHtml(x.description)}</p>` : ''}<p class=
 <footer>${escHtml(b.name)}${b.footer ? ` · ${escHtml(b.footer)}` : ''}<br><a href="/w/${webId}">Ver más inmuebles</a></footer></main>
 <div class="bar">${contactButtons(c, askText)}<a class="btn" href="#visita">Pedir visita</a></div>`;
   const desc = [x.price, x.facts.slice(0, 3).join(' · '), x.location].filter(Boolean).join(' · ');
-  return webShell({ brand: b, title: `${x.title} · ${b.name}`, desc, image: n ? `${origin}/w/${webId}/${x.id}/portada.jpg` : '', url, body, script: LEAD_SCRIPT });
+  const priceNum = Number(String(x.price).replace(/[^\d]/g, '')) || undefined;
+  const ld = { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: x.title, description: (x.description || desc).slice(0, 500), url, image: n ? [`${origin}/w/${webId}/${x.id}/portada.jpg`] : undefined,
+    offers: priceNum ? { '@type': 'Offer', price: priceNum, priceCurrency: 'EUR', availability: x.stamp === 'vendido' || x.stamp === 'reservado' ? 'https://schema.org/SoldOut' : 'https://schema.org/InStock', seller: { '@type': 'RealEstateAgent', name: b.name } } : undefined,
+    address: x.location ? { '@type': 'PostalAddress', addressLocality: x.location, addressCountry: 'ES' } : undefined };
+  const head = `<script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\u003c')}</script>`;
+  return webShell({ brand: b, title: `${x.title} · ${b.name}`, desc, image: n ? `${origin}/w/${webId}/${x.id}/portada.jpg` : '', url, body: `<div id="hitctx" data-w="${webId}" data-p="${x.id}" hidden></div>` + body, script: LEAD_SCRIPT, head });
 }
 async function bioPage(req, data, webId) {
   const b = data.brand, c = contactOf(b), origin = originOf(req);
@@ -860,13 +891,13 @@ async function bioPage(req, data, webId) {
     const x = publicProp(p), has = ((await readManifest(x.id)).photos?.length || 0) > 0;
     items.push(`<a class="item" href="/w/${webId}/${x.id}">${has ? `<img src="/w/${webId}/${x.id}/foto/0" alt="" loading="lazy">` : '<span class="ph"></span>'}<div>${x.stampLabel ? `<span class="stamp ${x.stamp}">${escHtml(x.stampLabel)}</span>` : ''}<b>${escHtml(x.title)}</b><small>${escHtml([x.location, `REF. ${x.ref}`].filter(Boolean).join(' · '))}</small>${x.price ? `<div class="p">${escHtml(x.price)}</div>` : ''}</div></a>`);
   }
-  const links = [contactButtons(c, `Hola, os escribo desde Instagram.`), c.web && `<a class="btn light" href="https://${escHtml(c.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">${escHtml(c.web)}</a>`].filter(Boolean).join('');
+  const links = [contactButtons(c, `Hola, os escribo desde Instagram.`), c.web && `<a class="btn light" data-hit="web" href="https://${escHtml(c.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">${escHtml(c.web)}</a>`].filter(Boolean).join('');
   const body = `<main><div class="hero">${logoHtml(b)}<h1>${escHtml(b.name)}</h1><p>${escHtml([b.slogan, b.subline].filter(Boolean).join(' · '))}</p></div>
 <div class="links">${links}<a class="btn" href="#vender">¿Quieres vender o alquilar tu vivienda?</a></div>
 <p class="sec">Inmuebles disponibles</p><div class="list">${items.join('') || '<p class="card">Pronto publicaremos nuevos inmuebles.</p>'}</div>
 <section class="card" id="vender"><h2>¿Vendes, alquilas o buscas vivienda?</h2>${leadForm(webId, 0, 'Hola, me gustaría que me contactarais para…', b)}</section>
 <footer>${escHtml(b.name)}${b.footer ? ` · ${escHtml(b.footer)}` : ''}</footer></main>`;
-  return webShell({ brand: b, title: b.name, desc: [b.slogan, b.subline, 'Inmuebles disponibles'].filter(Boolean).join(' · '), image: '', url: `${origin}/w/${webId}`, body, script: LEAD_SCRIPT });
+  return webShell({ brand: b, title: b.name, desc: [b.slogan, b.subline, 'Inmuebles disponibles'].filter(Boolean).join(' · '), image: '', url: `${origin}/w/${webId}`, body: `<div id="hitctx" data-w="${webId}" data-p="bio" hidden></div>` + body, script: LEAD_SCRIPT });
 }
 const leadHits = new Map();
 async function handleWeb(req, res, url) {
@@ -875,10 +906,10 @@ async function handleWeb(req, res, url) {
   const data = await brandByWebId(m[1]);
   if (!data) return send(res, 404, 'Esta página no existe o ya no está disponible.', { 'Content-Type': 'text/plain; charset=utf-8' });
   const html = h => send(res, 200, h, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=60' });
-  if (!m[2]) return html(await bioPage(req, data, m[1]));
+  if (!m[2]) { countHit(data.brand.id, 'view', 'bio', req); return html(await bioPage(req, data, m[1])); }
   const p = data.properties.find(x => String(x.id) === m[2]);
   if (!p) return send(res, 404, 'Este inmueble ya no está disponible.', { 'Content-Type': 'text/plain; charset=utf-8' });
-  if (!m[3]) return html(await propertyPage(req, data, m[1], p));
+  if (!m[3]) { countHit(data.brand.id, 'view', String(p.id), req); return html(await propertyPage(req, data, m[1], p)); }
   const ref = String(p.id);
   if (m[3] === 'portada.jpg') return sendCover(res, ref, 'public, max-age=600');
   const ph = (await readManifest(ref)).photos?.[Number(m[4])];
@@ -891,7 +922,7 @@ async function handleWeb(req, res, url) {
 async function handleLead(req, res, url) {
   const m = url.pathname.match(/^\/api\/lead\/([a-f0-9]{16})\/([A-Za-z0-9_-]{1,40})$/);
   if (!m || req.method !== 'POST') return sendJson(res, 404, { error: 'No encontrado' });
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const ip = clientIp(req);
   const hits = (leadHits.get(ip) || []).filter(t => Date.now() - t < 3600_000);
   if (hits.length >= 6) return sendJson(res, 429, { error: 'Has enviado varias solicitudes seguidas. Inténtalo más tarde o llámanos.' });
   hits.push(Date.now()); leadHits.set(ip, hits);
@@ -911,8 +942,116 @@ async function handleLead(req, res, url) {
     all.unshift(lead);
     await writeAtomic(join(leadsDir, `${data.brand.id}.json`), JSON.stringify(all.slice(0, 3000)));
   });
+  countHit(data.brand.id, 'click', `form:${lead.propertyId || 'bio'}`);
+  notifyLead(data.brand, lead, originOf(req)).catch(err => console.error('Aviso de contacto', err.message));
   return sendJson(res, 200, { ok: true });
 }
+
+// ─── Avisos de contactos nuevos: email (SMTP) y/o Telegram, según lo configurado ───
+// Variables: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, NOTIFY_EMAIL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+// Cada marca puede tener su propio email (notifyEmail) y chat de Telegram (telegramChatId).
+const mailer = process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS
+  ? nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } })
+  : null;
+const notifyChannels = brand => ({
+  email: mailer && (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(brand.notifyEmail || '') ? brand.notifyEmail : process.env.NOTIFY_EMAIL) || '',
+  telegram: process.env.TELEGRAM_BOT_TOKEN && (String(brand.telegramChatId || '').match(/^-?\d{5,20}$/) ? brand.telegramChatId : process.env.TELEGRAM_CHAT_ID) || '',
+});
+async function notifyLead(brand, lead, origin) {
+  const ch = notifyChannels(brand);
+  if (!ch.email && !ch.telegram) return;
+  const what = lead.ref ? `REF. ${lead.ref} · ${lead.title}` : 'Página de enlaces (bio)';
+  const lines = [`Nuevo contacto para ${brand.name}`, `Inmueble: ${what}`, `Nombre: ${lead.name}`, lead.phone && `Teléfono: ${lead.phone}`, lead.email && `Email: ${lead.email}`, lead.message && `Mensaje: ${lead.message}`, `Ver en la app: ${origin}/#contactos`].filter(Boolean);
+  const jobs = [];
+  if (ch.email) jobs.push(mailer.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to: ch.email, replyTo: lead.email || undefined, subject: `☏ Nuevo contacto · ${what}`, text: lines.join('\n') }));
+  if (ch.telegram) jobs.push(fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: ch.telegram, text: lines.join('\n'), disable_web_page_preview: true }) }).then(r => { if (!r.ok) throw new Error(`Telegram ${r.status}`); }));
+  const out = await Promise.allSettled(jobs);
+  out.filter(o => o.status === 'rejected').forEach(o => console.error('Aviso de contacto no enviado:', o.reason?.message));
+  return out;
+}
+
+// ─── Visitas y clics de la web pública (por día), sin cookies ni datos personales ───
+const statsDir = join(dataDir, 'stats');
+await mkdir(statsDir, { recursive: true });
+const BOT_UA = /bot|crawl|spider|slurp|facebookexternalhit|whatsapp|telegram|preview|curl|wget|python|headless|lighthouse/i;
+const statsBuf = new Map(), seenHits = new Map();
+async function readStats(id) { try { return JSON.parse(await readFile(join(statsDir, `${id}.json`), 'utf8')); } catch { return { days: {} }; } }
+function countHit(brandId, kind, key, req) {
+  if (req) {
+    if (BOT_UA.test(req.headers['user-agent'] || '')) return;
+    const k = `${clientIp(req)}|${brandId}|${kind}|${key}`, t = seenHits.get(k);
+    if (t && Date.now() - t < 30 * 60_000) return; // la misma persona recargando no cuenta dos veces
+    seenHits.set(k, Date.now());
+  }
+  const day = new Date().toISOString().slice(0, 10), b = statsBuf.get(brandId) || {};
+  const d = (b[day] ||= { views: {}, clicks: {} });
+  const bucket = kind === 'view' ? d.views : d.clicks;
+  bucket[key] = (bucket[key] || 0) + 1;
+  statsBuf.set(brandId, b);
+}
+async function flushStats() {
+  for (const [brandId, pending] of [...statsBuf]) {
+    statsBuf.delete(brandId);
+    await withLock(`stats-${brandId}`, async () => {
+      const st = await readStats(brandId);
+      for (const [day, d] of Object.entries(pending)) {
+        const t = (st.days[day] ||= { views: {}, clicks: {} });
+        for (const g of ['views', 'clicks']) for (const [k, n] of Object.entries(d[g])) t[g][k] = (t[g][k] || 0) + n;
+      }
+      const keep = Object.keys(st.days).sort().slice(-800);
+      st.days = Object.fromEntries(keep.map(k => [k, st.days[k]]));
+      await writeAtomic(join(statsDir, `${brandId}.json`), JSON.stringify(st));
+    }).catch(err => console.error('Estadísticas', err.message));
+  }
+  const old = Date.now() - 30 * 60_000;
+  for (const [k, t] of seenHits) if (t < old) seenHits.delete(k);
+}
+setInterval(flushStats, 20_000).unref();
+async function handleHit(req, res, url) {
+  const m = url.pathname.match(/^\/api\/hit\/([a-f0-9]{16})$/);
+  if (!m || req.method !== 'POST') return sendJson(res, 404, { error: 'No encontrado' });
+  const data = await brandByWebId(m[1]);
+  if (!data) return sendJson(res, 404, { error: 'No encontrado' });
+  const body = JSON.parse((await readRaw(req, 1024)).toString('utf8') || '{}');
+  const kind = ['wa', 'tel', 'web'].includes(body.k) ? body.k : null, pid = /^[A-Za-z0-9_-]{1,40}$/.test(body.p || '') ? body.p : 'bio';
+  if (kind) countHit(data.brand.id, 'click', `${kind}:${pid}`, req);
+  return send(res, 204, '');
+}
+
+// ─── Google: robots.txt y mapa del sitio con las páginas públicas ───
+async function publicSites() {
+  const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
+  const brands = parseJson(st.ruanoBrands, []).filter(b => b && safeWebId(b.webId));
+  const out = [];
+  for (const b of brands) { const d = await brandByWebId(b.webId); if (d) out.push(d); }
+  return out;
+}
+async function sitemap(req) {
+  const origin = originOf(req), urls = [];
+  for (const d of await publicSites()) {
+    urls.push(`${origin}/w/${d.brand.webId}`);
+    d.properties.forEach(p => urls.push(`${origin}/w/${d.brand.webId}/${p.id}`));
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `<url><loc>${escHtml(u)}</loc></url>`).join('\n')}\n</urlset>`;
+}
+
+// ─── Copia de seguridad diaria (estado, contactos, revisiones y estadísticas); se guardan 14 días ───
+const backupsDir = join(dataDir, 'backups');
+async function backupNow() {
+  const dir = join(backupsDir, new Date().toISOString().slice(0, 10));
+  await mkdir(dir, { recursive: true });
+  await copyFile(stateFile, join(dir, 'state.json')).catch(() => {});
+  for (const [src, name] of [[leadsDir, 'leads'], [reviewsDir, 'reviews'], [statsDir, 'stats']]) {
+    const files = await readdir(src).catch(() => []);
+    if (!files.length) continue;
+    await mkdir(join(dir, name), { recursive: true });
+    for (const f of files) await copyFile(join(src, f), join(dir, name, f)).catch(() => {});
+  }
+  const days = (await readdir(backupsDir)).filter(f => /^\d{4}-\d{2}-\d{2}$/.test(f)).sort();
+  for (const old of days.slice(0, -14)) await rm(join(backupsDir, old), { recursive: true, force: true });
+}
+setTimeout(() => backupNow().catch(err => console.error('Copia de seguridad', err.message)), 60_000).unref();
+setInterval(() => backupNow().catch(err => console.error('Copia de seguridad', err.message)), 24 * 3600_000).unref();
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -930,20 +1069,29 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(302, { Location: '/' });
       return res.end();
     }
-    return send(res, 200, loginPage(url.searchParams.has('error')), {
+    return send(res, 200, loginPage(url.searchParams.get('error') === '2' ? 'lock' : url.searchParams.has('error')), {
       'Content-Type': 'text/html; charset=utf-8',
     });
   }
 
   if (url.pathname === '/login' && req.method === 'POST') {
     try {
+      // Freno a quien intente adivinar la contraseña: 5 fallos en 15 minutos bloquean esa conexión 15 minutos
+      const ip = clientIp(req), fails = (loginFails.get(ip) || []).filter(t => Date.now() - t < 15 * 60_000);
+      if (fails.length >= 5) {
+        res.writeHead(303, { Location: '/login?error=2' });
+        return res.end();
+      }
       const form = new URLSearchParams(await readBody(req));
       const ok = safeEqual(form.get('username') || '', username)
         && safeEqual(form.get('password') || '', password);
       if (!ok) {
-        res.writeHead(303, { Location: '/login?error=1' });
+        fails.push(Date.now()); loginFails.set(ip, fails);
+        if (fails.length === 5) console.warn('Acceso bloqueado 15 minutos por intentos fallidos desde', ip);
+        res.writeHead(303, { Location: fails.length >= 5 ? '/login?error=2' : '/login?error=1' });
         return res.end();
       }
+      loginFails.delete(ip);
       const secure = isProduction ? '; Secure' : '';
       res.writeHead(303, {
         Location: '/',
@@ -975,6 +1123,20 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/w/') && req.method === 'GET') {
     try { return await handleWeb(req, res, url); }
     catch (err) { console.error('Web', err.message); return send(res, 500, 'No se pudo cargar la página', { 'Content-Type': 'text/plain; charset=utf-8' }); }
+  }
+  if (url.pathname.startsWith('/api/hit/')) {
+    try { return await handleHit(req, res, url); } catch { return send(res, 204, ''); }
+  }
+  if (url.pathname === '/robots.txt') {
+    return send(res, 200, `User-agent: *
+Allow: /w/
+Disallow: /
+Sitemap: ${originOf(req)}/sitemap.xml
+`, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
+  }
+  if (url.pathname === '/sitemap.xml') {
+    try { return send(res, 200, await sitemap(req), { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }); }
+    catch { return send(res, 500, '', { 'Content-Type': 'text/plain' }); }
   }
   if (url.pathname.startsWith('/api/lead/')) {
     try { return await handleLead(req, res, url); }

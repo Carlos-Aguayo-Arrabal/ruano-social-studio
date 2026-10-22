@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.0.0",
-    "mp4-muxer": "5.2.2"
+    "mp4-muxer": "5.2.2",
+    "nodemailer": "6.9.16"
   }
 }
