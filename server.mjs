@@ -471,6 +471,20 @@ async function handleApi(req, res, url) {
     return sendJson(res, 405, { error: 'Método no permitido' });
   }
 
+  // Portada ya diseñada (logo, pie, título y precio) que la app sube al ver la foto 1
+  if (m[2] === 'cover') {
+    if (req.method === 'GET') return sendCover(res, ref, 'private, max-age=60');
+    if (req.method === 'PUT') {
+      const body = await readRaw(req, MAX_PHOTO_BYTES);
+      const isJpg = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
+      if (!isJpg) return sendJson(res, 400, { error: 'La portada debe ser JPG' });
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'cover.jpg'), body);
+      return sendJson(res, 200, { ok: true, bytes: body.length });
+    }
+    return sendJson(res, 405, { error: 'Método no permitido' });
+  }
+
   const id = safeId(m[2]);
   if (!id) return sendJson(res, 400, { error: 'Foto no válida' });
   if (req.method === 'GET') {
@@ -495,6 +509,21 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
   return sendJson(res, 405, { error: 'Método no permitido' });
+}
+
+// Portada diseñada si existe; si no, la primera foto del inmueble
+async function sendCover(res, ref, cache) {
+  const manifest = await readManifest(ref);
+  if (!manifest.photos?.length) return sendJson(res, 404, { error: 'Sin foto' });
+  const dir = join(photosDir, ref);
+  try { return send(res, 200, await readFile(join(dir, 'cover.jpg')), { 'Content-Type': 'image/jpeg', 'Cache-Control': cache }); } catch {}
+  const ph = manifest.photos[0];
+  if (safeId(ph.id)) {
+    for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
+      try { return send(res, 200, await readFile(join(dir, `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': cache }); } catch {}
+    }
+  }
+  return sendJson(res, 404, { error: 'Sin foto' });
 }
 
 function parseCookies(req) {
@@ -615,12 +644,9 @@ async function handleReview(req, res, url) {
   if (!data) return sendJson(res, 404, { error: 'Enlace no válido' });
   if (m[3]) {
     const prop = data.properties.find(p => String(p.id) === m[3]);
-    const ph = prop && (await readManifest(String(prop.id))).photos?.[0];
-    if (!ph || !safeId(ph.id)) return sendJson(res, 404, { error: 'Sin foto' });
-    for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
-      try { return send(res, 200, await readFile(join(photosDir, String(prop.id), `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': 'private, max-age=3600' }); } catch {}
-    }
-    return sendJson(res, 404, { error: 'Sin foto' });
+    const ref = prop && safeRef(String(prop.id));
+    if (!ref) return sendJson(res, 404, { error: 'Sin foto' });
+    return sendCover(res, ref, 'private, max-age=300');
   }
   const reviews = await readReviews(data.brand.id);
   if (m[4]) {
@@ -644,7 +670,7 @@ async function handleReview(req, res, url) {
       const prop = data.properties.find(p => String(p.reference) === String(x.propertyRef));
       const rv = reviews[x.id];
       return { id: x.id, title: clip(x.title, 200), type: clip(x.type, 30), channel: clip(x.channel, 40), date: clip(x.date, 10), caption: clip(x.caption, 5000),
-        review: rv && rv.at >= (x.updatedAt || 0) ? rv : null, photo: prop ? `/api/review/${m[1]}/photo/${prop.id}` : null };
+        review: rv && rv.at >= (x.updatedAt || 0) ? rv : null, photo: prop ? `/api/review/${m[1]}/photo/${prop.id}?v=${Math.floor(Date.now() / 300000)}` : null };
     });
   const b = data.brand;
   return sendJson(res, 200, { brand: { name: b.name, color: b.color, color2: b.color2, logo: b.logo || (b.id === 'ruano' ? DEFAULT_LOGO : '') }, items });
@@ -660,7 +686,7 @@ h1{font:700 22px Georgia,serif;margin:0}header p{margin:4px 0 0;opacity:.85;font
 main{max-width:760px;margin:0 auto;padding:18px}.intro{font-size:14px;color:#506176;line-height:1.5;margin:0 0 16px}
 .summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.summary span{background:#fff;border:1px solid #e2e8ef;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:700}
 .card{background:#fff;border:1px solid #e2e8ef;border-radius:14px;overflow:hidden;margin-bottom:14px;box-shadow:0 6px 20px rgba(16,42,71,.06)}
-.card img{width:100%;max-height:340px;object-fit:cover;display:block;background:#e9eef2}
+.card img{width:100%;height:auto;max-height:620px;object-fit:contain;display:block;background:#e9eef2}
 .body{padding:14px 16px}.meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:11px;color:#718095;margin-bottom:6px}
 .tag{background:#eef3fb;color:var(--c2,#0d447f);font-weight:700;border-radius:6px;padding:3px 7px}
 h2{font-size:16px;margin:4px 0 8px}.caption{white-space:pre-wrap;font-size:14px;line-height:1.5;margin:0;color:#25344a}
