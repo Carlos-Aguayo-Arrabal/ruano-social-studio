@@ -1316,7 +1316,7 @@ async function handleGdrive(req, res, url, user) {
   if (url.pathname === '/api/gdrive/connect') {
     if (!gdriveConfigured()) return sendJson(res, 400, { error: 'Falta configurar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en el servidor' });
     const state = `${user.id}.${Date.now()}`, u = new URL(GAUTH);
-    Object.entries({ client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri, response_type: 'code', scope: GDRIVE_SCOPES, access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state: `${state}.${sign(state)}`, ...(process.env.GDRIVE_ACCOUNT ? { login_hint: process.env.GDRIVE_ACCOUNT } : {}) }).forEach(([k, v]) => u.searchParams.set(k, v));
+    Object.entries({ client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri, response_type: 'code', scope: GDRIVE_SCOPES, access_type: 'offline', prompt: 'select_account consent', include_granted_scopes: 'true', state: `${state}.${sign(state)}`, ...(process.env.GDRIVE_ACCOUNT ? { login_hint: process.env.GDRIVE_ACCOUNT } : {}) }).forEach(([k, v]) => u.searchParams.set(k, v));
     res.writeHead(302, { Location: u.toString() });
     return res.end();
   }
