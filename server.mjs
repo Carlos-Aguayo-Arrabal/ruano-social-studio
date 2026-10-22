@@ -475,7 +475,7 @@ async function handleApi(req, res, url) {
 
   // Portada ya diseñada (logo, pie, título y precio) que la app sube al ver la foto 1
   if (m[2] === 'cover') {
-    if (req.method === 'GET') return sendCover(res, ref, 'private, max-age=60');
+    if (req.method === 'GET') return sendCover(res, ref, 'private, max-age=60', url.searchParams.has('raw'));
     if (req.method === 'PUT') {
       const body = await readRaw(req, MAX_PHOTO_BYTES);
       const isJpg = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
@@ -514,11 +514,12 @@ async function handleApi(req, res, url) {
 }
 
 // Portada diseñada si existe; si no, la primera foto del inmueble
-async function sendCover(res, ref, cache) {
+async function sendCover(res, ref, cache, raw = false) {
   const manifest = await readManifest(ref);
   if (!manifest.photos?.length) return sendJson(res, 404, { error: 'Sin foto' });
   const dir = join(photosDir, ref);
-  try { return send(res, 200, await readFile(join(dir, 'cover.jpg')), { 'Content-Type': 'image/jpeg', 'Cache-Control': cache }); } catch {}
+  // raw: la primera foto tal cual (miniatura de la ficha del inmueble), sin el diseño de portada
+  if (!raw) try { return send(res, 200, await readFile(join(dir, 'cover.jpg')), { 'Content-Type': 'image/jpeg', 'Cache-Control': cache }); } catch {}
   const ph = manifest.photos[0];
   if (safeId(ph.id)) {
     for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
