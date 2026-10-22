@@ -37,6 +37,61 @@ try {
   for (const f of backups.slice(0, -10)) await unlink(join(dataDir, f));
 } catch {}
 const MAX_STATE_BYTES = 5 * 1024 * 1024;
+
+// ─── Almacén por empresa (store.json): cada empresa con sus inmuebles y contenidos.
+// Los navegadores envían solo lo que cambian (altas, cambios y bajas por elemento) y el servidor lo combina,
+// así dos personas pueden trabajar a la vez sin pisarse. Se crea a partir del state.json antiguo la primera vez.
+const storeFile = join(dataDir, 'store.json');
+let storeCache = null;
+function migrateLegacyState(st) {
+  const parse = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
+  const brands = parse(st.ruanoBrands, []).filter(b => b && /^[A-Za-z0-9_-]{1,40}$/.test(b.id || ''));
+  const bd = parse(st.ruanoBrandData, {}), active = st.ruanoActiveBrand || brands[0]?.id, data = {};
+  for (const b of brands) {
+    const src = b.id === active ? st : (bd[b.id] || {});
+    data[b.id] = { content: parse(src.ruanoContent, []).filter(x => x && x.id != null), properties: parse(src.ruanoProperties, []).filter(x => x && x.id != null) };
+  }
+  return { version: 2, v: 1, brands, data };
+}
+async function readStore() {
+  if (storeCache) return storeCache;
+  try { storeCache = JSON.parse(await readFile(storeFile, 'utf8')); }
+  catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    const legacy = await readFile(stateFile, 'utf8').catch(() => '');
+    storeCache = migrateLegacyState(legacy ? JSON.parse(legacy) : {});
+    if (legacy) {
+      await copyFile(stateFile, join(dataDir, `state.pre-store-${Date.now()}.json`)).catch(() => {});
+      await writeAtomic(storeFile, JSON.stringify(storeCache));
+      console.log(`Datos convertidos al formato por empresa: ${storeCache.brands.length} empresas`);
+    }
+  }
+  storeCache.brands ||= []; storeCache.data ||= {};
+  return storeCache;
+}
+async function writeStore(st) { st.v = (st.v || 0) + 1; st.savedAt = new Date().toISOString(); storeCache = st; await writeAtomic(storeFile, JSON.stringify(st)); }
+const brandDataOf = (st, id) => st.data[id] || { content: [], properties: [] };
+async function propertyBrand(propId) {
+  const st = await readStore();
+  for (const [id, d] of Object.entries(st.data)) if ((d.properties || []).some(p => String(p.id) === String(propId))) return id;
+  return null;
+}
+
+// ─── Usuarios: el administrador (APP_USERNAME/APP_PASSWORD) y los usuarios de cada agencia (users.json) ───
+const usersFile = join(dataDir, 'users.json');
+let usersCache = [];
+try { usersCache = JSON.parse(await readFile(usersFile, 'utf8')); } catch {}
+const hashPassword = (pw, salt) => new Promise((ok, ko) => crypto.scrypt(String(pw), salt, 64, (e, k) => (e ? ko(e) : ok(k.toString('hex')))));
+const OWNER = { id: 'owner', username, name: 'Administrador', role: 'admin', brands: [] };
+const canBrand = (user, id) => !!user && (user.role === 'admin' || (user.brands || []).includes(id));
+const publicUser = u => ({ id: u.id, username: u.username, name: u.name || u.username, role: u.role, brands: u.brands || [], disabled: !!u.disabled, owner: u.id === 'owner' });
+async function saveUsers(list) { usersCache = list; await writeAtomic(usersFile, JSON.stringify(list, null, 1)); }
+async function authenticate(u, pw) {
+  if (safeEqual(u, username) && safeEqual(pw, password)) return OWNER;
+  const user = usersCache.find(x => x.username.toLowerCase() === String(u).toLowerCase() && !x.disabled);
+  const hash = await hashPassword(pw, user ? user.salt : 'no-existe-este-usuario');
+  return user && safeEqual(hash, user.hash) ? user : null;
+}
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 
 const safeRef = r => (/^[A-Za-z0-9_-]{1,40}$/.test(r || '') ? r : null);
@@ -399,23 +454,111 @@ function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), { 'Content-Type': 'application/json; charset=utf-8' });
 }
 
-async function handleApi(req, res, url) {
+async function handleApi(req, res, url, user) {
+  const deny = () => sendJson(res, 403, { error: 'No tienes acceso a esta empresa' });
+  const brandParam = () => { const id = safeBrandId(url.searchParams.get('brand')); return id && canBrand(user, id) ? id : null; };
+  if (url.pathname === '/api/me') return sendJson(res, 200, publicUser(user));
+
+  // Sincronización por partes
+  if (url.pathname === '/api/sync' && req.method === 'GET') {
+    const st = await readStore(), brands = st.brands.filter(b => canBrand(user, b.id));
+    return sendJson(res, 200, { user: publicUser(user), v: st.v, brands, data: Object.fromEntries(brands.map(b => [b.id, brandDataOf(st, b.id)])) });
+  }
+  if (url.pathname === '/api/sync' && req.method === 'POST') {
+    const body = JSON.parse((await readRaw(req, MAX_STATE_BYTES)).toString('utf8') || '{}');
+    const result = await withLock('store', async () => {
+      const st = await readStore(), denied = [];
+      const okId = id => /^[A-Za-z0-9_-]{1,40}$/.test(String(id ?? ''));
+      for (const b of body.brands?.upsert || []) {
+        if (!b || !safeBrandId(b.id)) continue;
+        const i = st.brands.findIndex(x => x.id === b.id);
+        if (i >= 0) { if (canBrand(user, b.id)) st.brands[i] = b; else denied.push(b.id); }
+        else if (user.role === 'admin') { st.brands.push(b); st.data[b.id] ||= { content: [], properties: [] }; }
+        else denied.push(b.id);
+      }
+      for (const id of body.brands?.remove || []) {
+        if (user.role !== 'admin') { denied.push(id); continue; }
+        st.brands = st.brands.filter(x => x.id !== id); delete st.data[id];
+      }
+      for (const [bid, ch] of Object.entries(body.data || {})) {
+        if (!st.brands.some(b => b.id === bid) || !canBrand(user, bid)) { denied.push(bid); continue; }
+        const d = (st.data[bid] ||= { content: [], properties: [] });
+        for (const key of ['content', 'properties']) {
+          const c = ch?.[key]; if (!c) continue;
+          const list = (d[key] ||= []);
+          const gone = new Set((c.remove || []).map(String));
+          if (gone.size) d[key] = list.filter(x => !gone.has(String(x.id)));
+          for (const item of c.upsert || []) {
+            if (!item || !okId(item.id)) continue;
+            const i = d[key].findIndex(x => String(x.id) === String(item.id));
+            if (i >= 0) d[key][i] = item; else if (key === 'content') d[key].unshift(item); else d[key].unshift(item);
+          }
+        }
+      }
+      await writeStore(st);
+      return { v: st.v, denied };
+    });
+    return sendJson(res, 200, { ok: true, ...result });
+  }
+  if (url.pathname === '/api/state') return sendJson(res, 409, { error: 'La app se ha actualizado: recarga la página (Ctrl+F5) para seguir guardando.' });
+
+  // Usuarios (solo administradores)
+  if (url.pathname === '/api/users' || url.pathname.startsWith('/api/users/')) {
+    if (user.role !== 'admin') return sendJson(res, 403, { error: 'Solo un administrador puede gestionar usuarios' });
+    const um = url.pathname.match(/^\/api\/users(?:\/([a-f0-9]{12}))?$/);
+    if (!um) return sendJson(res, 404, { error: 'No encontrado' });
+    if (!um[1] && req.method === 'GET') return sendJson(res, 200, [publicUser(OWNER), ...usersCache.map(publicUser)]);
+    const body = req.method === 'DELETE' ? {} : JSON.parse((await readRaw(req, 8192)).toString('utf8') || '{}');
+    const st = await readStore(), validBrands = (body.brands || []).filter(id => st.brands.some(b => b.id === id));
+    const role = body.role === 'admin' ? 'admin' : 'agency';
+    if (!um[1] && req.method === 'POST') {
+      const uname = String(body.username || '').trim().toLowerCase();
+      if (!/^[a-z0-9._-]{3,30}$/.test(uname)) return sendJson(res, 400, { error: 'Usuario: 3 a 30 letras o números, sin espacios' });
+      if (uname === String(username).toLowerCase() || usersCache.some(u => u.username === uname)) return sendJson(res, 400, { error: 'Ese usuario ya existe' });
+      if (String(body.password || '').length < 8) return sendJson(res, 400, { error: 'La contraseña debe tener al menos 8 caracteres' });
+      if (role === 'agency' && !validBrands.length) return sendJson(res, 400, { error: 'Elige al menos una empresa para este usuario' });
+      const salt = crypto.randomBytes(16).toString('hex');
+      const u = { id: crypto.randomBytes(6).toString('hex'), username: uname, name: clip(body.name, 60) || uname, role, brands: role === 'admin' ? [] : validBrands, salt, hash: await hashPassword(body.password, salt), pv: 0, createdAt: Date.now() };
+      await saveUsers([...usersCache, u]);
+      return sendJson(res, 200, publicUser(u));
+    }
+    const i = usersCache.findIndex(u => u.id === um[1]);
+    if (i < 0) return sendJson(res, 404, { error: 'Usuario no encontrado' });
+    const list = [...usersCache];
+    if (req.method === 'DELETE') { list.splice(i, 1); await saveUsers(list); return sendJson(res, 200, { ok: true }); }
+    if (req.method === 'POST') {
+      const u = { ...list[i] };
+      if (body.name != null) u.name = clip(body.name, 60) || u.username;
+      if (body.role) { u.role = role; }
+      if (body.brands) u.brands = u.role === 'admin' ? [] : validBrands;
+      if (body.disabled != null) { u.disabled = !!body.disabled; u.pv = (u.pv || 0) + 1; }
+      if (body.password != null) {
+        if (String(body.password).length < 8) return sendJson(res, 400, { error: 'La contraseña debe tener al menos 8 caracteres' });
+        u.salt = crypto.randomBytes(16).toString('hex'); u.hash = await hashPassword(body.password, u.salt); u.pv = (u.pv || 0) + 1;
+      }
+      list[i] = u; await saveUsers(list);
+      return sendJson(res, 200, publicUser(u));
+    }
+    return sendJson(res, 405, { error: 'Método no permitido' });
+  }
   // Contactos recibidos desde la web: listar, marcar como atendido o borrar
   if (url.pathname === '/api/stats' && req.method === 'GET') {
-    const id = safeBrandId(url.searchParams.get('brand'));
-    if (!id) return sendJson(res, 400, { error: 'Empresa no válida' });
+    const id = brandParam();
+    if (!id) return deny();
     await flushStats();
     return sendJson(res, 200, await readStats(id));
   }
   if (url.pathname === '/api/notify' && req.method === 'GET') {
-    const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
-    const b = parseJson(st.ruanoBrands, []).find(x => x && x.id === url.searchParams.get('brand')) || {};
+    const id = brandParam();
+    if (!id) return deny();
+    const b = (await readStore()).brands.find(x => x.id === id) || {};
     const ch = notifyChannels(b);
     return sendJson(res, 200, { email: ch.email ? ch.email.replace(/^(.).*(@.*)$/, '$1•••$2') : '', telegram: !!ch.telegram, smtp: !!mailer, telegramBot: !!process.env.TELEGRAM_BOT_TOKEN });
   }
   if (url.pathname === '/api/notify/test' && req.method === 'POST') {
-    const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
-    const b = parseJson(st.ruanoBrands, []).find(x => x && x.id === url.searchParams.get('brand'));
+    const id = brandParam();
+    if (!id) return deny();
+    const b = (await readStore()).brands.find(x => x.id === id);
     if (!b) return sendJson(res, 400, { error: 'Empresa no válida' });
     const ch = notifyChannels(b);
     if (!ch.email && !ch.telegram) return sendJson(res, 400, { error: 'No hay ningún aviso configurado todavía.' });
@@ -423,11 +566,12 @@ async function handleApi(req, res, url) {
     catch (err) { return sendJson(res, 502, { error: err.message }); }
   }
   if (url.pathname === '/api/leads' && req.method === 'GET') {
-    const id = safeBrandId(url.searchParams.get('brand'));
+    const id = brandParam();
     return sendJson(res, id ? 200 : 400, id ? await readLeads(id) : { error: 'Empresa no válida' });
   }
   const lm = url.pathname.match(/^\/api\/leads\/([A-Za-z0-9_-]{1,40})\/([a-f0-9]{16})$/);
   if (lm) {
+    if (!canBrand(user, lm[1])) return deny();
     const file = join(leadsDir, `${lm[1]}.json`);
     const changes = req.method === 'POST' ? JSON.parse((await readRaw(req, 4096)).toString('utf8') || '{}') : null;
     if (req.method !== 'POST' && req.method !== 'DELETE') return sendJson(res, 405, { error: 'Método no permitido' });
@@ -443,36 +587,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, found ? 200 : 404, found ? { ok: true } : { error: 'Contacto no encontrado' });
   }
   if (url.pathname === '/api/reviews' && req.method === 'GET') {
-    const id = safeBrandId(url.searchParams.get('brand'));
+    const id = brandParam();
     return sendJson(res, id ? 200 : 400, id ? await readReviews(id) : { error: 'Empresa no válida' });
   }
 
   if (url.pathname.startsWith('/api/ai/')) return handleAi(req, res, url);
 
-  if (url.pathname === '/api/state') {
-    if (req.method === 'GET') {
-      try {
-        return send(res, 200, await readFile(stateFile), { 'Content-Type': 'application/json; charset=utf-8' });
-      } catch (err) {
-        if (err.code === 'ENOENT') return sendJson(res, 200, {});
-        throw err;
-      }
-    }
-    if (req.method === 'PUT') {
-      const body = await readRaw(req, MAX_STATE_BYTES);
-      const data = JSON.parse(body.toString('utf8'));
-      if (!data || typeof data !== 'object' || Array.isArray(data)) return sendJson(res, 400, { error: 'Formato no válido' });
-      data.savedAt = new Date().toISOString();
-      await withLock('state', async () => {
-        // Protección: un navegador sin la lista de empresas no puede borrar las marcas ni los datos de las demás
-        const current = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
-        for (const k of ['ruanoBrands', 'ruanoActiveBrand', 'ruanoBrandData']) if (!(k in data) && k in current) data[k] = current[k];
-        await writeAtomic(stateFile, JSON.stringify(data));
-      });
-      return sendJson(res, 200, { ok: true, savedAt: data.savedAt });
-    }
-    return sendJson(res, 405, { error: 'Método no permitido' });
-  }
 
   // /api/photos/:ref  y  /api/photos/:ref/:id(.webp|.jpg)
   const m = url.pathname.match(/^\/api\/photos\/([^/]+)(?:\/([^/.]+)(\.(?:jpg|webp))?)?$/);
@@ -480,6 +600,7 @@ async function handleApi(req, res, url) {
   const ref = safeRef(decodeURIComponent(m[1]));
   if (!ref) return sendJson(res, 400, { error: 'Referencia no válida' });
   const dir = join(photosDir, ref);
+  if (user.role !== 'admin') { const owner = await propertyBrand(ref); if (owner && !canBrand(user, owner)) return deny(); }
 
   if (!m[2]) {
     if (req.method === 'GET') return sendJson(res, 200, await readManifest(ref));
@@ -589,11 +710,8 @@ function sign(value) {
   return crypto.createHmac('sha256', sessionSecret).update(value).digest('base64url');
 }
 
-function createSession() {
-  const payload = Buffer.from(JSON.stringify({
-    user: username,
-    exp: Date.now() + sessionDurationMs,
-  })).toString('base64url');
+function createSession(user = OWNER) {
+  const payload = Buffer.from(JSON.stringify({ uid: user.id, user: user.username, pv: user.pv || 0, exp: Date.now() + sessionDurationMs })).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 
@@ -603,18 +721,22 @@ function safeEqual(a, b) {
   return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
 }
 
-function validSession(req) {
+function currentUser(req) {
   const token = parseCookies(req).ruano_session;
-  if (!token) return false;
+  if (!token) return null;
   const [payload, signature] = token.split('.');
-  if (!payload || !signature || !safeEqual(signature, sign(payload))) return false;
+  if (!payload || !signature || !safeEqual(signature, sign(payload))) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    return data.user === username && Number(data.exp) > Date.now();
+    if (!(Number(data.exp) > Date.now())) return null;
+    if ((data.uid === 'owner' || !data.uid) && data.user === username) return OWNER;
+    const u = usersCache.find(x => x.id === data.uid && !x.disabled);
+    return u && (u.pv || 0) === (data.pv || 0) ? u : null; // al cambiar la contraseña se cierran sus sesiones
   } catch {
-    return false;
+    return null;
   }
 }
+const validSession = req => !!currentUser(req);
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -672,13 +794,11 @@ async function readReviews(id) { try { return JSON.parse(await readFile(join(rev
 // Marca, contenidos e inmuebles de la empresa a la que pertenece el enlace
 async function brandByToken(token) {
   if (!/^[a-f0-9]{24}$/.test(token || '')) return null;
-  const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
-  const brands = parseJson(st.ruanoBrands, []);
-  const brand = brands.find(b => b && b.reviewToken === token);
+  const st = await readStore();
+  const brand = st.brands.find(b => b && b.reviewToken === token);
   if (!brand || !safeBrandId(brand.id)) return null;
-  const active = st.ruanoActiveBrand || brands[0]?.id;
-  const src = brand.id === active ? st : (parseJson(st.ruanoBrandData, {})[brand.id] || {});
-  return { brand, content: parseJson(src.ruanoContent, []), properties: parseJson(src.ruanoProperties, []) };
+  const d = brandDataOf(st, brand.id);
+  return { brand, content: d.content || [], properties: d.properties || [] };
 }
 const reviewHits = new Map();
 const loginFails = new Map();
@@ -782,14 +902,11 @@ const hexColor = (c, d) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : d);
 async function readLeads(id) { try { return JSON.parse(await readFile(join(leadsDir, `${id}.json`), 'utf8')); } catch { return []; } }
 async function brandByWebId(webId) {
   if (!safeWebId(webId)) return null;
-  const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
-  const brands = parseJson(st.ruanoBrands, []);
-  const brand = brands.find(b => b && b.webId === webId);
+  const st = await readStore();
+  const brand = st.brands.find(b => b && b.webId === webId);
   if (!brand || !safeBrandId(brand.id)) return null;
-  const active = st.ruanoActiveBrand || brands[0]?.id;
-  const src = brand.id === active ? st : (parseJson(st.ruanoBrandData, {})[brand.id] || {});
   // Solo los inmuebles visibles en la web; nunca datos internos ni de propietarios
-  const properties = parseJson(src.ruanoProperties, []).filter(p => p && p.web !== false && safeRef(String(p.id)));
+  const properties = (brandDataOf(st, brand.id).properties || []).filter(p => p && p.web !== false && safeRef(String(p.id)));
   return { brand: { ...brand, logo: brand.logo || (brand.id === 'ruano' ? DEFAULT_LOGO : '') }, properties };
 }
 function contactOf(brand) {
@@ -1020,10 +1137,8 @@ async function handleHit(req, res, url) {
 
 // ─── Google: robots.txt y mapa del sitio con las páginas públicas ───
 async function publicSites() {
-  const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
-  const brands = parseJson(st.ruanoBrands, []).filter(b => b && safeWebId(b.webId));
-  const out = [];
-  for (const b of brands) { const d = await brandByWebId(b.webId); if (d) out.push(d); }
+  const st = await readStore(), out = [];
+  for (const b of st.brands.filter(b => b && safeWebId(b.webId))) { const d = await brandByWebId(b.webId); if (d) out.push(d); }
   return out;
 }
 async function sitemap(req) {
@@ -1041,6 +1156,8 @@ async function backupNow() {
   const dir = join(backupsDir, new Date().toISOString().slice(0, 10));
   await mkdir(dir, { recursive: true });
   await copyFile(stateFile, join(dir, 'state.json')).catch(() => {});
+  await copyFile(storeFile, join(dir, 'store.json')).catch(() => {});
+  await copyFile(usersFile, join(dir, 'users.json')).catch(() => {});
   for (const [src, name] of [[leadsDir, 'leads'], [reviewsDir, 'reviews'], [statsDir, 'stats']]) {
     const files = await readdir(src).catch(() => []);
     if (!files.length) continue;
@@ -1083,9 +1200,8 @@ const server = http.createServer(async (req, res) => {
         return res.end();
       }
       const form = new URLSearchParams(await readBody(req));
-      const ok = safeEqual(form.get('username') || '', username)
-        && safeEqual(form.get('password') || '', password);
-      if (!ok) {
+      const user = await authenticate(form.get('username') || '', form.get('password') || '');
+      if (!user) {
         fails.push(Date.now()); loginFails.set(ip, fails);
         if (fails.length === 5) console.warn('Acceso bloqueado 15 minutos por intentos fallidos desde', ip);
         res.writeHead(303, { Location: fails.length >= 5 ? '/login?error=2' : '/login?error=1' });
@@ -1095,7 +1211,7 @@ const server = http.createServer(async (req, res) => {
       const secure = isProduction ? '; Secure' : '';
       res.writeHead(303, {
         Location: '/',
-        'Set-Cookie': `ruano_session=${encodeURIComponent(createSession())}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure}`,
+        'Set-Cookie': `ruano_session=${encodeURIComponent(createSession(user))}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure}`,
       });
       return res.end();
     } catch {
@@ -1143,7 +1259,8 @@ Sitemap: ${originOf(req)}/sitemap.xml
     catch (err) { console.error('Contacto', err.message); return sendJson(res, err instanceof SyntaxError ? 400 : 500, { error: 'No se pudo enviar. Inténtalo de nuevo.' }); }
   }
 
-  if (!validSession(req)) {
+  const user = currentUser(req);
+  if (!user) {
     if (url.pathname.startsWith('/api/')) return sendJson(res, 401, { error: 'Sesión caducada' });
     res.writeHead(302, { Location: '/login' });
     return res.end();
@@ -1151,7 +1268,7 @@ Sitemap: ${originOf(req)}/sitemap.xml
 
   if (url.pathname.startsWith('/api/')) {
     try {
-      return await handleApi(req, res, url);
+      return await handleApi(req, res, url, user);
     } catch (err) {
       console.error('Error en', req.method, url.pathname, err.message);
       return sendJson(res, err.status || (err instanceof SyntaxError ? 400 : 500), { error: err.status ? err.message : 'No se pudo completar la operación' });
