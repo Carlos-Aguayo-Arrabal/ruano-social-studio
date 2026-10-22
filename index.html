@@ -53,7 +53,7 @@
       </div>
 
       <section class="view" id="content">
-        <div class="section-heading"><div><p class="eyebrow">BIBLIOTECA</p><h1>Contenidos</h1><p>Crea, revisa y controla todo lo que se publicará.</p></div><button class="primary-button" data-open-composer>＋ Crear contenido</button></div>
+        <div class="section-heading"><div><p class="eyebrow">BIBLIOTECA</p><h1>Contenidos</h1><p>Crea, revisa y controla todo lo que se publicará.</p></div><div class="heading-actions"><button class="secondary-button" data-owner-week title="Prepara las publicaciones de la semana para conseguir viviendas que vender">🏠 Captar propietarios</button><button class="primary-button" data-open-composer>＋ Crear contenido</button></div></div>
         <div class="flow-context" id="contentFlowHelp"><div><strong>Paso 4 · Revisa el paquete</strong><p>Comprueba los cuatro borradores y apruébalos antes de programar.</p></div><button class="primary-button" id="approvePropertyPack">Aprobar paquete y continuar →</button></div>
         <div class="toolbar"><div class="filter-tabs"><button class="active" data-filter="all">Todos</button><button data-filter="pending">Pendientes</button><button data-filter="approved">Aprobados</button><button data-filter="scheduled">Programados</button></div><input id="searchInput" type="search" placeholder="Buscar contenido…"></div>
         <div class="content-grid" id="contentGrid"></div>
@@ -162,6 +162,9 @@
           <p class="form-hint">Usa tus fotos en el orden de la galería, con sus ajustes, zoom suave y fundidos. Al principio muestra título y precio; al final, la referencia y el contacto. Sin música: añádela en Instagram al publicar (así puedes usar audios en tendencia).</p>
           <div class="form-row"><label>Fotos a usar<select id="reelCount"></select></label><label>Segundos por foto<select id="reelSeconds"><option value="3.5">3,5 s · dinámico</option><option value="4.5" selected>4,5 s · recomendado</option><option value="5.5">5,5 s · pausado</option><option value="6.5">6,5 s · lujo / alto standing</option></select></label></div>
           <div class="toggle-row"><div><strong>Color automático</strong><small>Iguala tonos y aclara las fotos oscuras en el vídeo</small></div><label class="switch"><input id="reelAuto" type="checkbox" checked><span></span></label></div>
+          <div class="form-row"><label>Estilo del reel<select id="reelStyle"><option value="clasico">Clásico · elegante y sobrio</option><option value="moderno">Moderno · colores de la marca, letra limpia</option><option value="lujo">Lujo · negro y dorado, más pausado</option></select></label></div>
+          <div class="toggle-row"><div><strong>Subtítulos con los datos clave</strong><small>Un dato en cada foto (dormitorios, terraza, garaje…). La mayoría ve los reels sin sonido</small></div><label class="switch"><input id="reelSubs" type="checkbox" checked><span></span></label></div>
+          <label id="reelSubsBox">Subtítulos (una línea por foto, desde la 2.ª; puedes cambiarlos)<textarea id="reelSubsText" rows="4"></textarea></label>
           <div class="toggle-row"><div><strong>Encabezado y pie corporativos</strong><small>Franja con el logo arriba y web, teléfono y referencia abajo, como en las fotos</small></div><label class="switch"><input id="reelFrame" type="checkbox" checked><span></span></label></div>
           <div class="toggle-row"><div><strong>Mostrar precio</strong><small>En la portada y en la etiqueta de la referencia</small></div><label class="switch"><input id="reelPrice" type="checkbox" checked><span></span></label></div>
           <div class="reel-tag-editor"><canvas id="reelPreview" width="1080" height="1920" title="Arrastra la etiqueta de la referencia"></canvas><div><strong>Posición de la referencia y el precio</strong><small>Arrastra la etiqueta en la vista previa (o pulsa donde la quieras). Se guarda para este inmueble.</small><button type="button" class="text-button" id="reelTagReset">Volver a la posición inicial</button></div></div>
@@ -472,12 +475,52 @@ function channelClass(channel){return channel.includes('+')?'both':channel.toLow
 function platformName(channel){return channel.includes('+')?'Instagram + Facebook':channel}
 // Foto de la tarjeta: la portada diseñada del inmueble (o su primera foto)
 function propertyOf(x){return x?.propertyRef?getProperties().find(p=>String(p.reference)===String(x.propertyRef)):null}
-function cardPhoto(x){const p=propertyOf(x);return p?`<img src="/api/photos/${encodeURIComponent(p.id)}/cover" alt="" loading="lazy" onerror="this.remove()">`:''}
+function cardPhoto(x){if(x.campaign==='captacion'&&x.owner)return `<img src="${ownerThumb(x)}" alt="">`;const p=propertyOf(x);return p?`<img src="/api/photos/${encodeURIComponent(p.id)}/cover" alt="" loading="lazy" onerror="this.remove()">`:''}
 async function copyContent(id){const item=content.find(x=>x.id===Number(id));if(!item)return;try{await navigator.clipboard.writeText(item.caption||'');showToast('Texto copiado. Pégalo en Instagram o Facebook')}catch{editContent(id);showToast('Selecciona el texto y usa Ctrl+C')}}
+// ── Captación de propietarios: 3 publicaciones por semana, rotando temas, con imagen de marca ──
+const OWNER_THEMES=[
+ {key:'valoracion',type:'Publicación',title:'¿Cuánto vale tu vivienda?',head:Z=>`¿Cuánto vale tu vivienda en ${Z}?`,sub:'Valoración gratuita y sin compromiso',
+  text:(Z,B)=>`¿Estás pensando en vender tu casa en ${Z} y no sabes cuánto pedir? 🏡\n\nEn ${B} te hacemos una valoración gratuita y sin compromiso, con datos reales de lo que se vende en tu zona.\n\n✅ Precio ajustado al mercado\n✅ Fotos y vídeo profesionales\n✅ Difusión en portales y redes sociales\n\nEscríbenos por privado o pide tu valoración desde el enlace de la bio.`},
+ {key:'compradores',type:'Historia',title:'Compradores buscando en la zona',head:Z=>`Buscamos viviendas en ${Z}`,sub:'Tenemos clientes interesados',
+  text:(Z,B)=>`1. 🔑 BUSCAMOS VIVIENDAS EN ${Z.toUpperCase()}\n2. Tenemos clientes buscando piso o casa en la zona\n3. Si estás pensando en vender, te ayudamos de principio a fin\n4. Escríbenos por privado · enlace en la bio`},
+ {key:'claves',type:'Carrusel',title:'5 claves para vender más rápido',head:()=>'5 claves para vender tu vivienda más rápido',sub:'Desliza y toma nota',
+  text:(Z,B)=>`Portada: 5 claves para vender tu vivienda más rápido\n1. Un precio realista desde el primer día: las viviendas sobrevaloradas se quedan meses en el mercado.\n2. Fotos profesionales y luminosas: son lo primero que ve el comprador.\n3. Pequeños arreglos: pintura, luz y orden marcan la diferencia.\n4. Documentación preparada (nota simple, certificado energético, último IBI) para no perder compradores.\n5. Difusión en portales y redes con un vídeo del inmueble.\nCierre: ¿Quieres vender en ${Z}? Te asesoramos sin compromiso · enlace en la bio`},
+ {key:'alquiler',type:'Publicación',title:'Alquila tu vivienda con tranquilidad',head:()=>'¿Alquilas tu vivienda?',sub:'Hazlo con tranquilidad',
+  text:(Z,B)=>`¿Tienes una vivienda en ${Z} y quieres alquilarla sin preocupaciones? 🔑\n\nEn ${B} nos encargamos de todo:\n\n✅ Selección y estudio de inquilinos\n✅ Contrato y gestión de la documentación\n✅ Fotos y difusión profesional\n\nCuéntanos tu caso por privado o desde el enlace de la bio.`},
+ {key:'errores',type:'Carrusel',title:'3 errores que bajan el precio de tu casa',head:()=>'3 errores que bajan el precio de tu casa',sub:'Y cómo evitarlos',
+  text:(Z,B)=>`Portada: 3 errores que bajan el precio de tu casa\n1. Salir con un precio demasiado alto: la vivienda se "quema" y acabas bajando más.\n2. Fotos oscuras o hechas con prisa: el comprador pasa de largo.\n3. No tener los papeles listos: retrasa la venta y genera desconfianza.\nCierre: En ${B} te ayudamos a vender bien y rápido en ${Z} · enlace en la bio`},
+ {key:'papeles',type:'Publicación',title:'Documentos para vender tu vivienda',head:()=>'¿Qué papeles necesitas para vender?',sub:'Te lo explicamos fácil',
+  text:(Z,B)=>`¿Vas a vender tu vivienda? Estos son los documentos que normalmente vas a necesitar 📄\n\n• Escritura de la vivienda y nota simple actualizada\n• Certificado de eficiencia energética\n• Último recibo del IBI\n• Certificado de la comunidad de estar al corriente de pago\n• Otros según tu comunidad autónoma\n\nEn ${B} lo revisamos contigo sin compromiso. Escríbenos o entra en el enlace de la bio.`},
+ {key:'porque',type:'Historia',title:'Por qué vender con nosotros',head:Z=>`¿Vendes en ${Z}?`,sub:'Así trabajamos',
+  text:(Z,B)=>`1. ¿VENDES TU VIVIENDA EN ${Z.toUpperCase()}?\n2. Valoración gratuita con datos reales de la zona\n3. Fotos, vídeo y difusión en portales y redes\n4. Te acompañamos hasta la firma · escríbenos`},
+ {key:'preparar',type:'Publicación',title:'Prepara tu casa para venderla',head:()=>'Prepara tu casa para las fotos',sub:'Pequeños cambios, gran diferencia',
+  text:(Z,B)=>`Antes de hacer las fotos de tu vivienda, estos detalles marcan la diferencia 📸\n\n✨ Abre persianas y enciende todas las luces\n✨ Despeja encimeras y superficies\n✨ Retira objetos personales y fotos familiares\n✨ Un toque de color: plantas, cojines, flores\n\nEn ${B} cuidamos cada foto para que tu vivienda destaque. Más información en el enlace de la bio.`}];
+function nextDays(){const out=[],d=new Date();d.setHours(12);for(let i=1;out.length<3&&i<14;i++){const x=new Date(d.getTime()+i*864e5),w=x.getDay();if([2,4,6].includes(w))out.push(isoDate(x))}return out}
+function ownerTags(){const z=tagWord(BRAND.zone||'');return[...new Set([...brandTags(),z&&`Inmobiliaria${z}`,z&&`Vender${z}`,'VenderCasa','ValoracionGratuita','Inmobiliaria'].filter(Boolean))].slice(0,10).map(t=>'#'+t.replace(/^#/,'')).join(' ')}
+function generateOwnerWeek(){const Z=BRAND.zone||'tu zona',B=BRAND.name,days=nextDays(),key=`captacion-${days[0]}`;
+ if(content.some(x=>x.campaignKey===key)){showToast('Las publicaciones de captación de esta semana ya están en Contenidos');return}
+ const list=getBrands(),b=list.find(x=>x.id===BRAND.id);let idx=Number(b?.ownerIdx)||0;const items=[];
+ days.forEach((date,k)=>{const th=OWNER_THEMES[(idx+k)%OWNER_THEMES.length],contact=document.querySelector('#footerText').value.trim()||BRAND.footer||'';
+  items.push({id:Date.now()+k,title:`Captación · ${th.title}`,type:th.type,channel:th.type==='Historia'?'Instagram':'Instagram + Facebook',status:'pending',date,
+   caption:`${th.text(Z,B)}${th.type==='Publicación'&&contact?`\n📞 ${contact}`:''}\n\n${ownerTags()}`,icon:'⌂',campaign:'captacion',campaignKey:key,owner:{head:th.head(Z),sub:th.sub,type:th.type},updatedAt:Date.now()})});
+ if(b){b.ownerIdx=(idx+days.length)%OWNER_THEMES.length;saveBrands(list)}
+ content.unshift(...items);save();renderAll();showView('content');showToast('3 publicaciones de captación creadas para esta semana. Revísalas y descarga sus imágenes')}
+// Imagen de marca para las publicaciones de captación (4:5 o 9:16 para historias)
+const ownerImgCache=new Map();
+function ownerImage(item,scale=1){const o=item.owner||{head:item.title,sub:''},story=o.type==='Historia',W=Math.round(1080*scale),H=Math.round((story?1920:1350)*scale),c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d'),k=scale;
+ const g=x.createLinearGradient(0,0,W,H);g.addColorStop(0,BRAND.color||'#0b315f');g.addColorStop(1,BRAND.color2||'#0d447f');x.fillStyle=g;x.fillRect(0,0,W,H);
+ x.globalAlpha=.08;x.fillStyle='#fff';for(let i=0;i<6;i++){x.beginPath();x.arc(W*(.15+i*.17),H*(i%2?.18:.86),W*.22,0,Math.PI*2);x.fill()}x.globalAlpha=1;
+ const logo=document.querySelector('#officialLogo');if(logo?.naturalWidth){const lh=150*k,lw=Math.min(lh*logo.naturalWidth/logo.naturalHeight,W*.5);x.fillStyle='#fff';reelRound(x,(W-lw)/2-30*k,(story?220:110)*k,lw+60*k,lh+40*k,28*k);x.fill();x.drawImage(logo,(W-lw)/2,(story?240:130)*k,lw,lh)}
+ x.textAlign='center';x.fillStyle='#fff';x.font=`700 ${Math.round(86*k)}px 'Playfair Display',Georgia,serif`;const lines=reelWrap(x,o.head,W-160*k).slice(0,4),lh=104*k,top=H*(story?.42:.42)-(lines.length-1)*lh/2;lines.forEach((l,i)=>x.fillText(l,W/2,top+i*lh));
+ x.font=`500 ${Math.round(44*k)}px 'DM Sans',Arial`;x.fillStyle='rgba(255,255,255,.88)';x.fillText(o.sub||'',W/2,top+lines.length*lh+10*k);
+ x.font=`800 ${Math.round(42*k)}px 'DM Sans',Arial`;const cta='Escríbenos · enlace en la bio',cw=x.measureText(cta).width+90*k,cy=H*(story?.7:.74);x.fillStyle='#fff';reelRound(x,(W-cw)/2,cy-48*k,cw,96*k,48*k);x.fill();x.fillStyle=BRAND.color||'#0b315f';x.fillText(cta,W/2,cy+15*k);
+ x.font=`600 ${Math.round(32*k)}px 'DM Sans',Arial`;x.fillStyle='rgba(255,255,255,.9)';x.fillText(document.querySelector('#footerText').value||BRAND.footer||BRAND.name,W/2,H-(story?260:80)*k);return c}
+function ownerThumb(item){if(!ownerImgCache.has(item.id))ownerImgCache.set(item.id,ownerImage(item,.3).toDataURL('image/jpeg',.8));return ownerImgCache.get(item.id)}
+function downloadOwnerImage(id){const it=content.find(x=>x.id===Number(id));if(!it)return;ownerImage(it).toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`${brandSlug()}-captacion-${it.date}.jpg`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);showToast('Imagen descargada')},'image/jpeg',.9)}
 function renderContent(){
  const q=(document.querySelector('#searchInput')?.value||'').toLowerCase();
  const items=content.filter(x=>(currentFilter==='all'||x.status===currentFilter)&&x.title.toLowerCase().includes(q));
- document.querySelector('#contentGrid').innerHTML=items.map(x=>`<article class="content-card" data-open-content="${x.id}"><div class="content-image">${cardPhoto(x)}${x.icon}<span class="status-badge status-${x.status}">${labels[x.status]}</span></div><div class="content-body"><span class="platform-tag ${channelClass(x.channel)}">${platformName(x.channel)}</span><h3>${esc(x.title)}${x.ai?'<span class="ai-badge">✦ IA</span>':''}</h3>${clientBadge(x)}<p>${esc(x.caption)}</p><div class="content-footer"><span>${x.type} · ${formatDate(x.date)}</span><div class="card-actions"><button class="card-link" data-copy-content="${x.id}">Copiar texto</button><button class="card-link" data-edit="${x.id}">Editar</button>${x.status==='pending'?`<button data-approve="${x.id}">Aprobar ✓</button>`:x.status!=='published'?`<button data-published="${x.id}" title="Ya está publicado en Instagram o Facebook">Publicado ✓</button>`:''}</div></div></div></article>`).join('')||'<p>No se han encontrado contenidos.</p>';
+ document.querySelector('#contentGrid').innerHTML=items.map(x=>`<article class="content-card" data-open-content="${x.id}"><div class="content-image">${cardPhoto(x)}${x.icon}<span class="status-badge status-${x.status}">${labels[x.status]}</span></div><div class="content-body"><span class="platform-tag ${channelClass(x.channel)}">${platformName(x.channel)}</span><h3>${esc(x.title)}${x.ai?'<span class="ai-badge">✦ IA</span>':''}</h3>${clientBadge(x)}<p>${esc(x.caption)}</p><div class="content-footer"><span>${x.type} · ${formatDate(x.date)}</span><div class="card-actions"><button class="card-link" data-copy-content="${x.id}">Copiar texto</button>${x.campaign==='captacion'?`<button class="card-link" data-owner-img="${x.id}">Imagen</button>`:''}<button class="card-link" data-edit="${x.id}">Editar</button>${x.status==='pending'?`<button data-approve="${x.id}">Aprobar ✓</button>`:x.status!=='published'?`<button data-published="${x.id}" title="Ya está publicado en Instagram o Facebook">Publicado ✓</button>`:''}</div></div></div></article>`).join('')||'<p>No se han encontrado contenidos.</p>';
 }
 function updateCounts(){['pending','approved','scheduled','published'].forEach(s=>{const el=document.querySelector(`#${s}Count`);if(el)el.textContent=content.filter(x=>x.status===s).length});const n=content.filter(x=>x.status==='pending').length,b=document.querySelector('#pendingBadge');if(b){b.textContent=n;b.hidden=!n}}
 function formatDate(d){return new Intl.DateTimeFormat('es-ES',{day:'numeric',month:'short'}).format(new Date(d+'T12:00:00'))}
@@ -737,6 +780,8 @@ document.addEventListener('click',e=>{
  if(e.target.closest('.mobile-menu'))document.querySelector('.sidebar').classList.toggle('open');
  if(e.target.closest('[data-open-ideas]'))showToast('Ideas creadas: inmueble destacado, consejo del vendedor y barrio de la semana');
  const edit=e.target.closest('[data-edit]');if(edit)editContent(edit.dataset.edit);
+ if(e.target.closest('[data-owner-week]')){generateOwnerWeek();return}
+ {const oi=e.target.closest('[data-owner-img]');if(oi){downloadOwnerImage(oi.dataset.ownerImg);return}}
  const pubBtn=e.target.closest('[data-published]');if(pubBtn){const it=content.find(x=>x.id===Number(pubBtn.dataset.published));if(it){it.status='published';it.publishedAt=Date.now();it.updatedAt=Date.now();save();renderAll();showToast(`“${it.title}” marcado como publicado`)}return}
  const copyBtn=e.target.closest('[data-copy-content]');if(copyBtn)copyContent(copyBtn.dataset.copyContent);
  const openC=e.target.closest('[data-open-content],[data-cal-event]');if(openC&&!e.target.closest('button'))editContent(openC.dataset.openContent||openC.dataset.calEvent);
@@ -1041,8 +1086,18 @@ function reelTagXY(r,w){const top=(r.frame?r.frame.head:0)+20,bottom=REEL_H-(r.f
 let reelPrev=null;
 function buildReelPreview(){const imgs=photoState.images;if(!imgs.length)return;const i=imgs.length>1?1:0;
  const pl=reelPlate(imgs[i],photoState.adjustments[i],document.querySelector('#reelAuto').checked);
- reelPrev={plates:[pl,pl],D:4.5,n:2,info:reelInfo(document.querySelector('#reelPrice').checked),frame:reelFrameOpts(),labels:['',photoState.adjustments[i]?.label||''],tagPos:getActiveProperty()?.reelTag||null};drawReelPreview()}
+ reelPrev={plates:[pl,pl],D:4.5,n:2,style:document.querySelector('#reelStyle').value,subs:['',reelSubsList(2)[1]||''],info:reelInfo(document.querySelector('#reelPrice').checked),frame:reelFrameOpts(),labels:['',photoState.adjustments[i]?.label||''],tagPos:getActiveProperty()?.reelTag||null};drawReelPreview()}
 function drawReelPreview(){if(!reelPrev)return;const c=document.querySelector('#reelPreview');drawReelFrame(c.getContext('2d'),reelPrev.D*1.5,reelPrev)}
+// Estilos del reel: tipografía y colores de los bloques de texto
+function reelStyle(name){const c1=BRAND.color||'#0b315f',c2=BRAND.color2||'#0d447f';
+ if(name==='moderno')return{title:"800 70px 'DM Sans',Arial",lineH:82,panel:hexA(c1,.88),panel0:hexA(c1,0),accent:'#ffffff',accentText:c1,chip:hexA(c2,.96),chipText:'#ffffff',dot:'#ffffff',tag:'#ffffff',tagText:c1,kicker:'rgba(255,255,255,.85)',sub:hexA(c1,.9),subText:'#ffffff'};
+ if(name==='lujo')return{title:"italic 600 80px 'Playfair Display',Georgia,serif",lineH:90,panel:'rgba(8,8,8,.8)',panel0:'rgba(8,8,8,0)',accent:'#c9a96e',accentText:'#121212',chip:'rgba(10,10,10,.8)',chipText:'#ecd9ae',dot:'#c9a96e',tag:'rgba(10,10,10,.85)',tagText:'#ecd9ae',kicker:'#c9a96e',sub:'rgba(10,10,10,.78)',subText:'#f3e6c4'};
+ return{title:"700 76px 'Playfair Display',Georgia,serif",lineH:88,panel:'rgba(5,20,40,.82)',panel0:'rgba(5,20,40,0)',accent:c2,accentText:'#ffffff',chip:'rgba(255,255,255,.96)',chipText:c1,dot:c2,tag:hexA(c2,.94),tagText:'#ffffff',kicker:'#ffffff',sub:'rgba(5,20,40,.74)',subText:'#ffffff'}}
+// Subtítulos por defecto: un dato del inmueble en cada foto y el precio o la visita en la última
+function reelSubtitles(n){const p=getActiveProperty();if(!p||n<2)return[];const cap=t=>{t=String(t||'').trim();return t?t.charAt(0).toUpperCase()+t.slice(1):''};
+ const extras=String(p.extras||'').split(/\s*[·,;]\s*/).map(cap).filter(Boolean);
+ const facts=[...new Set([p.beds,p.baths,p.built&&`${p.built} construidos`,p.useful,p.floor,...extras,p.location&&`En ${p.location.split(',')[0]}`].map(cap).filter(Boolean))];
+ const out=[];for(let i=1;i<n;i++)out.push(i===n-1?(p.price&&!['reservado','vendido'].includes(p.stamp)?`${p.price} · Solicita tu visita`:'Solicita tu visita'):facts[i-1]||'');return out}
 function drawReelFrame(x,t,r){const {plates,D,n,info}=r,total=n*D+REEL_OUTRO,photoEnd=n*D;x.clearRect(0,0,REEL_W,REEL_H);
  const F=Math.min(REEL_FADE,D*.3),span=k=>{const a=k*D-(k?F:0),b=(k+1)*D+(k===n-1?F:0);return[a,b]},prog=(k,tm)=>{const[a,b]=span(k);return clamp01((tm-a)/(b-a))};
  if(t<photoEnd+F){const tt=Math.min(t,photoEnd-.001),i=Math.floor(tt/D),local=tt-i*D;
@@ -1053,22 +1108,27 @@ function drawReelFrame(x,t,r){const {plates,D,n,info}=r,total=n*D+REEL_OUTRO,pho
   const logo=document.querySelector('#officialLogo');if(!r.frame&&logo?.naturalWidth){const lh=120,lw=lh*logo.naturalWidth/logo.naturalHeight;x.fillStyle='rgba(255,255,255,.95)';reelRound(x,60,250,lw+40,lh+28,22);x.fill();x.drawImage(logo,80,264,lw,lh)}
   // Portada: bloque de texto con fondo oscuro propio para que se lea sobre cualquier foto
   const introA=t<D?clamp01(t/.5)*clamp01((D-F*.5-t)/.6):0;
-  if(introA>0){const up=(1-ease(clamp01(t/.6)))*40;x.font="700 76px 'Playfair Display',Georgia,serif";let lines=reelWrap(x,info.title,REEL_W-140);
+  const S=reelStyle(r.style);
+  if(introA>0){const up=(1-ease(clamp01(t/.6)))*40;x.font=S.title;let lines=reelWrap(x,info.title,REEL_W-140);
    if(lines.length>3){lines=lines.slice(0,3);while(x.measureText(lines[2]+'…').width>REEL_W-140)lines[2]=lines[2].replace(/\s*\S+$/,'');lines[2]+='…'}
-   const kickerY=info.stamp?790:740,titleY=kickerY+96,factsY=titleY+(lines.length-1)*88+66,priceY=factsY+(info.facts?84:16),bottomY=priceY+(info.price?52:0)+60,topY=kickerY-(info.stamp?170:90);
-   x.globalAlpha=introA;g=x.createLinearGradient(0,topY-160,0,topY);g.addColorStop(0,'rgba(5,20,40,0)');g.addColorStop(1,'rgba(5,20,40,.82)');x.fillStyle=g;x.fillRect(0,topY-160,REEL_W,160);
-   x.fillStyle='rgba(5,20,40,.82)';x.fillRect(0,topY,REEL_W,bottomY-topY);g=x.createLinearGradient(0,bottomY,0,bottomY+140);g.addColorStop(0,'rgba(5,20,40,.82)');g.addColorStop(1,'rgba(5,20,40,0)');x.fillStyle=g;x.fillRect(0,bottomY,REEL_W,140);
+   const kickerY=info.stamp?790:740,titleY=kickerY+96,factsY=titleY+(lines.length-1)*S.lineH+66,priceY=factsY+(info.facts?84:16),bottomY=priceY+(info.price?52:0)+60,topY=kickerY-(info.stamp?170:90);
+   x.globalAlpha=introA;g=x.createLinearGradient(0,topY-160,0,topY);g.addColorStop(0,S.panel0);g.addColorStop(1,S.panel);x.fillStyle=g;x.fillRect(0,topY-160,REEL_W,160);
+   x.fillStyle=S.panel;x.fillRect(0,topY,REEL_W,bottomY-topY);g=x.createLinearGradient(0,bottomY,0,bottomY+140);g.addColorStop(0,S.panel);g.addColorStop(1,S.panel0);x.fillStyle=g;x.fillRect(0,bottomY,REEL_W,140);
    if(info.stamp){x.font="800 40px 'DM Sans',Arial";const tw=x.measureText(info.stamp).width;x.fillStyle=info.stampColor;reelRound(x,70,kickerY-122+up,tw+52,74,14);x.fill();x.fillStyle='#fff';x.fillText(info.stamp,96,kickerY-72+up)}
-   x.fillStyle='#fff';x.font="700 38px 'DM Sans',Arial";x.fillText((info.kicker||'').toUpperCase(),70,kickerY+up);
-   x.font="700 76px 'Playfair Display',Georgia,serif";lines.forEach((l,k)=>x.fillText(l,70,titleY+k*88+up));
+   x.fillStyle=S.kicker;x.font="700 38px 'DM Sans',Arial";x.fillText((info.kicker||'').toUpperCase(),70,kickerY+up);x.fillStyle='#fff';
+   x.font=S.title;lines.forEach((l,k)=>x.fillText(l,70,titleY+k*S.lineH+up));
    if(info.facts){x.font="500 40px 'DM Sans',Arial";x.fillStyle='rgba(255,255,255,.92)';x.fillText(info.facts,70,factsY+up);x.fillStyle='#fff'}
-   if(info.price){x.font="700 54px 'DM Sans',Arial";const pw=x.measureText(info.price).width;x.fillStyle=BRAND.color2;reelRound(x,70,priceY-50+up,pw+56,82,16);x.fill();x.fillStyle='#fff';x.fillText(info.price,98,priceY+12+up);
+   if(info.price){x.font="700 54px 'DM Sans',Arial";const pw=x.measureText(info.price).width;x.fillStyle=S.accent;reelRound(x,70,priceY-50+up,pw+56,82,16);x.fill();x.fillStyle=S.accentText;x.fillText(info.price,98,priceY+12+up);
     if(info.oldPrice){x.font="500 40px 'DM Sans',Arial";const ox=70+pw+86,ow=x.measureText(info.oldPrice).width;x.fillStyle='rgba(255,255,255,.85)';x.fillText(info.oldPrice,ox,priceY+8+up);x.fillRect(ox-2,priceY-6+up,ow+4,4)}}
    x.globalAlpha=1}
   // Etiqueta de estancia: entra deslizándose al empezar cada foto (no en la portada) y sale antes del cambio
   {const lab=r.labels?.[i];if(lab&&i>0){const la=ease(clamp01((local-.25)/.45))*(i<n-1?clamp01((D-F*.6-local)/.4):1);if(la>0){x.save();x.globalAlpha=la;x.font="700 46px 'DM Sans',Arial";const tw=x.measureText(lab).width,bx=70-(1-la)*40,by=1040;
-   x.fillStyle='rgba(255,255,255,.96)';reelRound(x,bx,by,tw+100,84,42);x.fill();x.fillStyle=BRAND.color2;x.beginPath();x.arc(bx+40,by+42,10,0,Math.PI*2);x.fill();x.fillStyle=BRAND.color;x.textBaseline='middle';x.fillText(lab,bx+64,by+45);x.restore()}}}
-  const tagA=t>D-F*.5?clamp01((t-(D-F*.5))/.6):0;if(tagA>0){x.globalAlpha=tagA;x.font="700 38px 'DM Sans',Arial";const tag=info.tag,tw=x.measureText(tag).width;x.fillStyle=hexA(BRAND.color2,.94);const tp=reelTagXY(r,tw+52);r._tagRect={x:tp.x,y:tp.y,w:tw+52,h:72};reelRound(x,tp.x,tp.y,tw+52,72,36);x.fill();x.fillStyle='#fff';x.fillText(tag,tp.x+26,tp.y+49);x.globalAlpha=1}}
+   x.fillStyle=S.chip;reelRound(x,bx,by,tw+100,84,42);x.fill();x.fillStyle=S.dot;x.beginPath();x.arc(bx+40,by+42,10,0,Math.PI*2);x.fill();x.fillStyle=S.chipText;x.textBaseline='middle';x.fillText(lab,bx+64,by+45);x.restore()}}}
+  // Subtítulo con un dato clave del inmueble (desde la foto 2)
+  {const sub=r.subs?.[i];if(sub&&i>0){const sa=ease(clamp01((local-.55)/.5))*clamp01((D-F*.5-local)/.45);if(sa>0){x.save();x.globalAlpha=sa;x.font="700 50px 'DM Sans',Arial";x.textAlign='center';x.textBaseline='middle';
+   const lines=reelWrap(x,sub,REEL_W-200).slice(0,2),lh=64,h=lines.length*lh+44,w=Math.min(REEL_W-120,Math.max(...lines.map(l=>x.measureText(l).width))+90),cy=REEL_H-(r.frame?r.frame.foot:0)-250+(1-sa)*24;
+   x.fillStyle=S.sub;reelRound(x,(REEL_W-w)/2,cy-h/2,w,h,24);x.fill();x.fillStyle=S.subText;lines.forEach((l,k)=>x.fillText(l,REEL_W/2,cy-(lines.length-1)*lh/2+k*lh+2));x.restore()}}}
+  const tagA=t>D-F*.5?clamp01((t-(D-F*.5))/.6):0;if(tagA>0){x.globalAlpha=tagA;x.font="700 38px 'DM Sans',Arial";const tag=info.tag,tw=x.measureText(tag).width;x.fillStyle=S.tag;const tp=reelTagXY(r,tw+52);r._tagRect={x:tp.x,y:tp.y,w:tw+52,h:72};reelRound(x,tp.x,tp.y,tw+52,72,36);x.fill();x.fillStyle=S.tagText;x.fillText(tag,tp.x+26,tp.y+49);x.globalAlpha=1}}
  // Cierre: foto desenfocada, entrada escalonada y llamada a la acción con latido suave
  if(t>=photoEnd){const ot=t-photoEnd,a=ease(clamp01(ot/F)),st=k=>ease(clamp01((ot-.35-k*.2)/.6)),{phone,web}=splitContact(info.contact);
   x.globalAlpha=a;x.drawImage(r.outroBg,0,0);x.globalAlpha=1;x.textAlign='center';
@@ -1100,9 +1160,15 @@ let reelBlob=null,reelUrl='',reelBusy=false;
  c.addEventListener('pointerup',end);c.addEventListener('pointercancel',end);
  document.querySelector('#reelTagReset').addEventListener('click',()=>{const pr=getActiveProperty();if(pr)updateProperty(pr.id,{reelTag:null});if(reelPrev){reelPrev.tagPos=null;drawReelPreview()}});
  ['reelFrame','reelPrice','reelAuto'].forEach(id=>document.querySelector('#'+id).addEventListener('change',()=>setTimeout(buildReelPreview,0)))}
+function reelSubsList(n){if(!document.querySelector('#reelSubs').checked)return[];const lines=document.querySelector('#reelSubsText').value.split('\n').map(x=>x.trim());return['',...Array.from({length:n-1},(_,k)=>lines[k]||'')]}
+function fillReelSubs(force){const ta=document.querySelector('#reelSubsText');if(ta.dataset.edited&&!force)return;ta.value=reelSubtitles(Number(document.querySelector('#reelCount').value)).join('\n');delete ta.dataset.edited}
+document.querySelector('#reelSubsText').addEventListener('input',e=>{e.target.dataset.edited='1';setTimeout(buildReelPreview,0)});
+document.querySelector('#reelSubs').addEventListener('change',e=>{document.querySelector('#reelSubsBox').hidden=!e.target.checked;setTimeout(buildReelPreview,0)});
+document.querySelector('#reelCount').addEventListener('change',()=>fillReelSubs());
+document.querySelector('#reelStyle').addEventListener('change',e=>{const sec={clasico:'4.5',moderno:'3.5',lujo:'6.5'}[e.target.value];if(sec){document.querySelector('#reelSeconds').value=sec;updateReelTotal()}const pr=getActiveProperty();if(pr)updateProperty(pr.id,{reelStyle:e.target.value});setTimeout(buildReelPreview,0)});
 function openReel(){if(photoState.images.length<2){showToast('Sube al menos 2 fotos para crear el reel');return}
  const n=photoState.images.length,sel=document.querySelector('#reelCount'),def=Math.min(n,12);sel.innerHTML=Array.from({length:Math.min(n,20)-1},(_,k)=>k+2).map(v=>`<option value="${v}"${v===def?' selected':''}>${v===n?`Todas (${v})`:`Las ${v} primeras`}</option>`).join('');
- document.querySelector('#reelOptions').hidden=false;document.querySelector('#reelStage').hidden=true;updateReelTotal();document.querySelector('#reelModal').classList.add('open');setTimeout(buildReelPreview,30)}
+ document.querySelector('#reelOptions').hidden=false;document.querySelector('#reelStage').hidden=true;{const st=getActiveProperty()?.reelStyle||'clasico';document.querySelector('#reelStyle').value=st}delete document.querySelector('#reelSubsText').dataset.edited;fillReelSubs(true);document.querySelector('#reelSubsBox').hidden=!document.querySelector('#reelSubs').checked;updateReelTotal();document.querySelector('#reelModal').classList.add('open');setTimeout(buildReelPreview,30)}
 function updateReelTotal(){const n=Number(document.querySelector('#reelCount').value),d=Number(document.querySelector('#reelSeconds').value),t=Math.round(n*d+REEL_OUTRO);
  document.querySelector('#reelTotal').textContent=`Duración: ${t} s${t>90?' · recomendable menos de 90 s':''}${canEncodeReel()?'':' · se graba en tiempo real, mantén esta pestaña abierta.'}`}
 function closeReel(){if(reelBusy)return;document.querySelector('#reelModal').classList.remove('open')}
@@ -1113,7 +1179,7 @@ async function generateReel(){const mime=reelMime();if(!mime&&!canEncodeReel()){
  const c=document.createElement('canvas');c.width=REEL_W;c.height=REEL_H;screen.replaceChildren(c);const x=c.getContext('2d');
  try{await document.fonts?.ready;status.textContent='Preparando fotos…';const plates=[];
   for(let i=0;i<n;i++){plates.push(reelPlate(photoState.images[i],photoState.adjustments[i],document.querySelector('#reelAuto').checked));bar.style.width=`${(i+1)/n*15}%`;await new Promise(r=>setTimeout(r,0))}
-  const r={plates,D,n,info,frame:reelFrameOpts(),tagPos:getActiveProperty()?.reelTag||null,outroBg:reelOutroBg(plates[0]),labels:photoState.adjustments.slice(0,n).map(a=>a?.label||'')},total=n*D+REEL_OUTRO;drawReelFrame(x,0,r);
+  const r={plates,D,n,info,frame:reelFrameOpts(),tagPos:getActiveProperty()?.reelTag||null,style:document.querySelector('#reelStyle').value,subs:reelSubsList(n),outroBg:reelOutroBg(plates[0]),labels:photoState.adjustments.slice(0,n).map(a=>a?.label||'')},total=n*D+REEL_OUTRO;drawReelFrame(x,0,r);
   let blob=null;
   // Fotograma a fotograma a 30 fps exactos: sin saltos aunque el equipo vaya lento o se cambie de pestaña
   if(canEncodeReel()){try{status.textContent='Creando el reel…';blob=await encodeReel(c,x,r,total,k=>{bar.style.width=`${15+k*85}%`;status.textContent=`Creando el reel… ${Math.round(k*100)} %`})}catch(err){console.warn('Codificador no disponible, se graba en tiempo real',err);blob=null}}
