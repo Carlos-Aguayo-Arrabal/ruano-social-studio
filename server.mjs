@@ -399,6 +399,27 @@ function sendJson(res, status, data) {
 }
 
 async function handleApi(req, res, url) {
+  // Contactos recibidos desde la web: listar, marcar como atendido o borrar
+  if (url.pathname === '/api/leads' && req.method === 'GET') {
+    const id = safeBrandId(url.searchParams.get('brand'));
+    return sendJson(res, id ? 200 : 400, id ? await readLeads(id) : { error: 'Empresa no válida' });
+  }
+  const lm = url.pathname.match(/^\/api\/leads\/([A-Za-z0-9_-]{1,40})\/([a-f0-9]{16})$/);
+  if (lm) {
+    const file = join(leadsDir, `${lm[1]}.json`);
+    const changes = req.method === 'POST' ? JSON.parse((await readRaw(req, 4096)).toString('utf8') || '{}') : null;
+    if (req.method !== 'POST' && req.method !== 'DELETE') return sendJson(res, 405, { error: 'Método no permitido' });
+    const found = await withLock(`leads-${lm[1]}`, async () => {
+      const all = await readLeads(lm[1]);
+      const i = all.findIndex(l => l.id === lm[2]);
+      if (i < 0) return false;
+      if (req.method === 'DELETE') all.splice(i, 1);
+      else all[i].status = changes.status === 'done' ? 'done' : 'new';
+      await writeAtomic(file, JSON.stringify(all));
+      return true;
+    });
+    return sendJson(res, found ? 200 : 404, found ? { ok: true } : { error: 'Contacto no encontrado' });
+  }
   if (url.pathname === '/api/reviews' && req.method === 'GET') {
     const id = safeBrandId(url.searchParams.get('brand'));
     return sendJson(res, id ? 200 : 400, id ? await readReviews(id) : { error: 'Empresa no válida' });
@@ -727,6 +748,172 @@ async function send(x,action,comment,btn){btn.disabled=true;try{const r=await fe
 load();
 </script></body></html>`;
 
+// ─── Web pública: página de cada inmueble, página de enlaces para la bio y contactos ───
+const leadsDir = join(dataDir, 'leads');
+await mkdir(leadsDir, { recursive: true });
+const safeWebId = w => (/^[a-f0-9]{16}$/.test(w || '') ? w : null);
+const escHtml = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const hexColor = (c, d) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : d);
+async function readLeads(id) { try { return JSON.parse(await readFile(join(leadsDir, `${id}.json`), 'utf8')); } catch { return []; } }
+async function brandByWebId(webId) {
+  if (!safeWebId(webId)) return null;
+  const st = parseJson(await readFile(stateFile, 'utf8').catch(() => ''), {});
+  const brands = parseJson(st.ruanoBrands, []);
+  const brand = brands.find(b => b && b.webId === webId);
+  if (!brand || !safeBrandId(brand.id)) return null;
+  const active = st.ruanoActiveBrand || brands[0]?.id;
+  const src = brand.id === active ? st : (parseJson(st.ruanoBrandData, {})[brand.id] || {});
+  // Solo los inmuebles visibles en la web; nunca datos internos ni de propietarios
+  const properties = parseJson(src.ruanoProperties, []).filter(p => p && p.web !== false && safeRef(String(p.id)));
+  return { brand: { ...brand, logo: brand.logo || (brand.id === 'ruano' ? DEFAULT_LOGO : '') }, properties };
+}
+function contactOf(brand) {
+  const footer = String(brand.footer || '');
+  const m = footer.match(/\+?\d[\d\s.]{7,}\d/);
+  const phone = m ? m[0].replace(/[\s.]/g, '') : '';
+  const web = (footer.replace(m ? m[0] : '', '').match(/\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/i) || [])[0] || '';
+  let wa = String(brand.whatsapp || '').replace(/\D/g, '');
+  if (wa.length === 9) wa = '34' + wa;
+  return { phone, web, wa: wa.length >= 11 ? wa : '' };
+}
+function niceTitleSrv(t, p) {
+  t = String(t || '').trim();
+  const letters = t.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, '');
+  if (letters && letters.replace(/[^A-ZÁÉÍÓÚÜÑ]/g, '').length / letters.length > 0.7) {
+    const names = String(p?.location || '').split(/[,\s]+/).filter(w => w.length > 2);
+    t = t.toLowerCase().split(' ').map(w => names.find(n => n.toLowerCase() === w) || w).join(' ');
+    t = t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  return t;
+}
+const WEB_STAMPS = { nuevo: 'Nuevo', precio: 'Nuevo precio', puertas: 'Puertas abiertas', reservado: 'Reservado', vendido: 'Vendido' };
+function publicProp(p) {
+  const stamp = WEB_STAMPS[p.stamp] ? p.stamp : '';
+  return {
+    id: String(p.id), ref: clip(p.reference, 20), title: niceTitleSrv(clip(p.title, 160), p), operation: clip(p.operation, 20) || 'Venta',
+    location: clip(p.location, 80), price: clip(p.price, 30), oldPrice: stamp === 'precio' ? clip(p.oldPrice, 30) : '',
+    facts: [p.built, p.useful, p.beds, p.baths, p.floor].map(x => clip(x, 40)).filter(Boolean),
+    extras: clip(p.extras, 300), description: clip(p.description, 4000),
+    stamp, stampLabel: stamp === 'vendido' && p.operation === 'Alquiler' ? 'Alquilado' : WEB_STAMPS[stamp] || '',
+  };
+}
+const originOf = req => `${String(req.headers['x-forwarded-proto'] || (isProduction ? 'https' : 'http')).split(',')[0]}://${req.headers['x-forwarded-host'] || req.headers.host}`;
+
+function webShell({ brand, title, desc, image, url, body, script = '' }) {
+  const c1 = hexColor(brand.color, '#0b315f'), c2 = hexColor(brand.color2, '#0d447f');
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escHtml(title)}</title><meta name="description" content="${escHtml(desc)}">
+<meta property="og:type" content="website"><meta property="og:title" content="${escHtml(title)}"><meta property="og:description" content="${escHtml(desc)}"><meta property="og:url" content="${escHtml(url)}">${image ? `<meta property="og:image" content="${escHtml(image)}"><meta name="twitter:card" content="summary_large_image">` : ''}
+<style>:root{--c:${c1};--c2:${c2};--ink:#16212e;--muted:#64748b;--line:#e3e8ef;--bg:#f4f6f9}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}a{color:inherit}
+.top{display:block;text-decoration:none;background:#fff;border-bottom:1px solid var(--line)}.top .in{max-width:880px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px;text-decoration:none}.logo{width:46px;height:46px;border-radius:10px;display:grid;place-items:center;overflow:hidden;background:var(--c);color:#fff;font:700 22px Georgia,serif;flex:none}.logo img{width:100%;height:100%;object-fit:contain;background:#fff}.top b{display:block;font-size:16px}.top small{color:var(--muted);font-size:12.5px}
+main{max-width:880px;margin:0 auto;padding:0 0 110px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;margin:14px 16px}
+.gal{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:6px;background:#0d1b2a;scrollbar-width:none}.gal::-webkit-scrollbar{display:none}.gal img{flex:0 0 100%;width:100%;aspect-ratio:4/3;object-fit:cover;scroll-snap-align:center;background:#1c2b3c}@media(min-width:760px){.gal{border-radius:0 0 16px 16px}.gal img{flex-basis:78%}}
+.galnote{color:var(--muted);font-size:12.5px;text-align:center;margin:8px 0 0}.stamp{display:inline-block;background:var(--c2);color:#fff;font-weight:800;font-size:12px;letter-spacing:.04em;text-transform:uppercase;padding:5px 10px;border-radius:7px;margin-bottom:8px}.stamp.vendido,.stamp.reservado{background:#b4472d}
+.kick{color:var(--muted);font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}h1{font:700 clamp(25px,5vw,34px)/1.2 Georgia,"Times New Roman",serif;margin:4px 0 10px}.price{display:inline-block;background:var(--c);color:#fff;font-weight:800;font-size:24px;padding:6px 14px;border-radius:10px}.old{color:var(--muted);text-decoration:line-through;margin-left:10px}
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 4px;padding:0;list-style:none}.facts li{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:14px}.extras{color:var(--muted);font-size:14.5px}.desc{white-space:pre-line}.ref{color:var(--muted);font-size:13px}
+h2{font-size:19px;margin:0 0 12px}form{display:grid;gap:11px}label{display:grid;gap:4px;font-size:13.5px;font-weight:600}input,textarea{font:inherit;padding:11px 12px;border:1px solid #cdd6e1;border-radius:10px;background:#fff;width:100%}textarea{min-height:92px;resize:vertical}.consent{display:flex;gap:10px;align-items:flex-start;font-weight:400;font-size:12.5px;color:var(--muted)}.consent input{width:auto;margin-top:3px}.hp{position:absolute;left:-5000px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:12px;padding:13px 18px;font:700 15.5px system-ui,sans-serif;text-decoration:none;cursor:pointer;background:var(--c);color:#fff}.btn.wa{background:#1f9d55}.btn.light{background:#fff;color:var(--c);border:1px solid var(--line)}.btn:disabled{opacity:.6}.ok{background:#eaf7ef;border:1px solid #a7dbbb;color:#1f6b3d;border-radius:12px;padding:14px}.err{color:#b4472d;font-size:13.5px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;z-index:5}.bar .btn{flex:1;max-width:280px;padding:12px 10px}
+.list{display:grid;gap:12px;margin:0 16px}.item{display:grid;grid-template-columns:120px 1fr;gap:12px;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;text-decoration:none}.item img,.item .ph{width:120px;height:100%;min-height:104px;object-fit:cover;background:linear-gradient(145deg,#9ac4dc,#316d95)}.item div{padding:11px 12px 11px 0}.item b{display:block;line-height:1.3}.item small{color:var(--muted);display:block;font-size:13px}.item .p{color:var(--c);font-weight:800;margin-top:4px}.item .stamp{font-size:10.5px;padding:3px 7px;margin:0 0 4px}
+.hero{text-align:center;padding:26px 16px 8px}.hero .logo{width:84px;height:84px;margin:0 auto 10px;border-radius:18px;font-size:38px}.hero h1{margin:0}.hero p{color:var(--muted);margin:4px 0 0}.links{display:grid;gap:9px;max-width:440px;margin:16px auto 6px;padding:0 16px}.sec{max-width:880px;margin:22px auto 8px;padding:0 16px;font-size:13px;font-weight:800;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
+footer{text-align:center;color:var(--muted);font-size:12.5px;padding:18px 16px}</style></head><body>${body}${script ? `<script>${script}</script>` : ''}</body></html>`;
+}
+const logoHtml = b => (b.logo ? `<span class="logo"><img src="${escHtml(b.logo)}" alt="${escHtml(b.name)}"></span>` : `<span class="logo">${escHtml((b.name || '?')[0].toUpperCase())}</span>`);
+function leadForm(webId, propId, message, brand) {
+  const privacy = /^https?:\/\//i.test(brand.privacyUrl || '') ? ` <a href="${escHtml(brand.privacyUrl)}" target="_blank" rel="noopener">Política de privacidad</a>.` : '';
+  return `<form id="lead" data-api="/api/lead/${webId}/${propId}"><label>Nombre<input name="name" required maxlength="80" autocomplete="name"></label>
+<label>Teléfono<input name="phone" type="tel" maxlength="20" autocomplete="tel" inputmode="tel"></label><label>Email<input name="email" type="email" maxlength="120" autocomplete="email"></label>
+<label>Mensaje<textarea name="message" maxlength="1000">${escHtml(message)}</textarea></label><input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+<label class="consent"><input type="checkbox" name="consent" required><span>Acepto que ${escHtml(brand.name)} use mis datos solo para responder a esta solicitud. No se ceden a terceros.${privacy}</span></label>
+<p class="err" id="leadErr" hidden></p><button class="btn" type="submit">Enviar solicitud</button></form>`;
+}
+const LEAD_SCRIPT = `const f=document.getElementById('lead');if(f)f.addEventListener('submit',async e=>{e.preventDefault();const b=f.querySelector('button'),er=document.getElementById('leadErr'),d=Object.fromEntries(new FormData(f));d.consent=!!f.elements.consent.checked;
+if(!d.phone&&!d.email){er.textContent='Indica un teléfono o un email para poder responderte.';er.hidden=false;return}
+b.disabled=true;er.hidden=true;try{const r=await fetch(f.dataset.api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'No se pudo enviar');
+f.outerHTML='<div class="ok"><b>¡Gracias!</b> Hemos recibido tu solicitud y te contactaremos lo antes posible.</div>'}catch(x){er.textContent=x.message;er.hidden=false;b.disabled=false}});`;
+
+function contactButtons(c, text) {
+  return [c.wa && `<a class="btn wa" href="https://wa.me/${c.wa}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a>`,
+    c.phone && `<a class="btn light" href="tel:${escHtml(c.phone)}">Llamar</a>`].filter(Boolean).join('');
+}
+async function propertyPage(req, data, webId, p) {
+  const b = data.brand, c = contactOf(b), x = publicProp(p), origin = originOf(req), url = `${origin}/w/${webId}/${x.id}`;
+  const n = (await readManifest(x.id)).photos?.length || 0;
+  const gallery = n ? `<div class="gal">${Array.from({ length: Math.min(n, 40) }, (_, i) => `<img src="/w/${webId}/${x.id}/foto/${i}" alt="Foto ${i + 1} de ${escHtml(x.title)}"${i ? ' loading="lazy"' : ''}>`).join('')}</div><p class="galnote">${n} fotos · desliza para verlas</p>` : '';
+  const kicker = [x.operation === 'Alquiler' ? 'En alquiler' : 'En venta', x.location].filter(Boolean).join(' · ');
+  const askText = `Hola, me interesa la REF. ${x.ref} (${x.title}). ¿Podemos concertar una visita?`;
+  const body = `<a class="top" href="/w/${webId}"><div class="in">${logoHtml(b)}<div><b>${escHtml(b.name)}</b><small>${escHtml(b.slogan || b.subline || 'Ver todos los inmuebles')}</small></div></div></a>
+<main>${gallery}<section class="card">${x.stampLabel ? `<span class="stamp ${x.stamp}">${escHtml(x.stampLabel)}</span><br>` : ''}<span class="kick">${escHtml(kicker)}</span><h1>${escHtml(x.title)}</h1>
+${x.price ? `<span class="price">${escHtml(x.price)}</span>${x.oldPrice ? `<span class="old">${escHtml(x.oldPrice)}</span>` : ''}` : ''}
+${x.facts.length ? `<ul class="facts">${x.facts.map(f => `<li>${escHtml(f)}</li>`).join('')}</ul>` : ''}${x.extras ? `<p class="extras">${escHtml(x.extras)}</p>` : ''}
+${x.description ? `<p class="desc">${escHtml(x.description)}</p>` : ''}<p class="ref">Referencia ${escHtml(x.ref)}</p></section>
+<section class="card" id="visita"><h2>¿Te interesa? Pide información o una visita</h2>${leadForm(webId, x.id, `Me interesa la REF. ${x.ref}. ¿Cuándo podría visitarla?`, b)}</section>
+<footer>${escHtml(b.name)}${b.footer ? ` · ${escHtml(b.footer)}` : ''}<br><a href="/w/${webId}">Ver más inmuebles</a></footer></main>
+<div class="bar">${contactButtons(c, askText)}<a class="btn" href="#visita">Pedir visita</a></div>`;
+  const desc = [x.price, x.facts.slice(0, 3).join(' · '), x.location].filter(Boolean).join(' · ');
+  return webShell({ brand: b, title: `${x.title} · ${b.name}`, desc, image: n ? `${origin}/w/${webId}/${x.id}/portada.jpg` : '', url, body, script: LEAD_SCRIPT });
+}
+async function bioPage(req, data, webId) {
+  const b = data.brand, c = contactOf(b), origin = originOf(req);
+  const items = [];
+  for (const p of data.properties.slice(0, 60)) {
+    const x = publicProp(p), has = ((await readManifest(x.id)).photos?.length || 0) > 0;
+    items.push(`<a class="item" href="/w/${webId}/${x.id}">${has ? `<img src="/w/${webId}/${x.id}/foto/0" alt="" loading="lazy">` : '<span class="ph"></span>'}<div>${x.stampLabel ? `<span class="stamp ${x.stamp}">${escHtml(x.stampLabel)}</span>` : ''}<b>${escHtml(x.title)}</b><small>${escHtml([x.location, `REF. ${x.ref}`].filter(Boolean).join(' · '))}</small>${x.price ? `<div class="p">${escHtml(x.price)}</div>` : ''}</div></a>`);
+  }
+  const links = [contactButtons(c, `Hola, os escribo desde Instagram.`), c.web && `<a class="btn light" href="https://${escHtml(c.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">${escHtml(c.web)}</a>`].filter(Boolean).join('');
+  const body = `<main><div class="hero">${logoHtml(b)}<h1>${escHtml(b.name)}</h1><p>${escHtml([b.slogan, b.subline].filter(Boolean).join(' · '))}</p></div>
+<div class="links">${links}<a class="btn" href="#vender">¿Quieres vender o alquilar tu vivienda?</a></div>
+<p class="sec">Inmuebles disponibles</p><div class="list">${items.join('') || '<p class="card">Pronto publicaremos nuevos inmuebles.</p>'}</div>
+<section class="card" id="vender"><h2>¿Vendes, alquilas o buscas vivienda?</h2>${leadForm(webId, 0, 'Hola, me gustaría que me contactarais para…', b)}</section>
+<footer>${escHtml(b.name)}${b.footer ? ` · ${escHtml(b.footer)}` : ''}</footer></main>`;
+  return webShell({ brand: b, title: b.name, desc: [b.slogan, b.subline, 'Inmuebles disponibles'].filter(Boolean).join(' · '), image: '', url: `${origin}/w/${webId}`, body, script: LEAD_SCRIPT });
+}
+const leadHits = new Map();
+async function handleWeb(req, res, url) {
+  const m = url.pathname.match(/^\/w\/([a-f0-9]{16})(?:\/([A-Za-z0-9_-]{1,40})(?:\/(foto\/(\d{1,3})|portada\.jpg))?)?\/?$/);
+  if (!m) return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain; charset=utf-8' });
+  const data = await brandByWebId(m[1]);
+  if (!data) return send(res, 404, 'Esta página no existe o ya no está disponible.', { 'Content-Type': 'text/plain; charset=utf-8' });
+  const html = h => send(res, 200, h, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=60' });
+  if (!m[2]) return html(await bioPage(req, data, m[1]));
+  const p = data.properties.find(x => String(x.id) === m[2]);
+  if (!p) return send(res, 404, 'Este inmueble ya no está disponible.', { 'Content-Type': 'text/plain; charset=utf-8' });
+  if (!m[3]) return html(await propertyPage(req, data, m[1], p));
+  const ref = String(p.id);
+  if (m[3] === 'portada.jpg') return sendCover(res, ref, 'public, max-age=600');
+  const ph = (await readManifest(ref)).photos?.[Number(m[4])];
+  if (!ph || !safeId(ph.id)) return send(res, 404, 'Sin foto', { 'Content-Type': 'text/plain; charset=utf-8' });
+  for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
+    try { return send(res, 200, await readFile(join(photosDir, ref, `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': 'public, max-age=600' }); } catch {}
+  }
+  return send(res, 404, 'Sin foto', { 'Content-Type': 'text/plain; charset=utf-8' });
+}
+async function handleLead(req, res, url) {
+  const m = url.pathname.match(/^\/api\/lead\/([a-f0-9]{16})\/([A-Za-z0-9_-]{1,40})$/);
+  if (!m || req.method !== 'POST') return sendJson(res, 404, { error: 'No encontrado' });
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const hits = (leadHits.get(ip) || []).filter(t => Date.now() - t < 3600_000);
+  if (hits.length >= 6) return sendJson(res, 429, { error: 'Has enviado varias solicitudes seguidas. Inténtalo más tarde o llámanos.' });
+  hits.push(Date.now()); leadHits.set(ip, hits);
+  const data = await brandByWebId(m[1]);
+  if (!data) return sendJson(res, 404, { error: 'Página no disponible' });
+  const body = JSON.parse((await readRaw(req, 8 * 1024)).toString('utf8') || '{}');
+  if (body.website) return sendJson(res, 200, { ok: true }); // trampa para robots
+  const name = clip(body.name, 80), phone = clip(body.phone, 20).replace(/[^\d+ ]/g, ''), email = clip(body.email, 120), message = clip(body.message, 1000);
+  if (name.length < 2) return sendJson(res, 400, { error: 'Escribe tu nombre.' });
+  if (phone.replace(/\D/g, '').length < 9 && !/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(email)) return sendJson(res, 400, { error: 'Indica un teléfono o un email válido.' });
+  if (body.consent !== true) return sendJson(res, 400, { error: 'Necesitamos tu consentimiento para responderte.' });
+  const p = m[2] === '0' ? null : data.properties.find(x => String(x.id) === m[2]);
+  const lead = { id: crypto.randomBytes(8).toString('hex'), at: Date.now(), status: 'new', name, phone, email, message,
+    propertyId: p ? String(p.id) : '', ref: p ? clip(p.reference, 20) : '', title: p ? niceTitleSrv(clip(p.title, 160), p) : '', source: p ? 'inmueble' : 'bio' };
+  await withLock(`leads-${data.brand.id}`, async () => {
+    const all = await readLeads(data.brand.id);
+    all.unshift(lead);
+    await writeAtomic(join(leadsDir, `${data.brand.id}.json`), JSON.stringify(all.slice(0, 3000)));
+  });
+  return sendJson(res, 200, { ok: true });
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -783,6 +970,15 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/api/review/')) {
     try { return await handleReview(req, res, url); }
     catch (err) { console.error('Revisión', err.message); return sendJson(res, err instanceof SyntaxError ? 400 : 500, { error: 'No se pudo completar' }); }
+  }
+  // Web pública de la inmobiliaria (inmuebles y página de enlaces) y formulario de contacto
+  if (url.pathname.startsWith('/w/') && req.method === 'GET') {
+    try { return await handleWeb(req, res, url); }
+    catch (err) { console.error('Web', err.message); return send(res, 500, 'No se pudo cargar la página', { 'Content-Type': 'text/plain; charset=utf-8' }); }
+  }
+  if (url.pathname.startsWith('/api/lead/')) {
+    try { return await handleLead(req, res, url); }
+    catch (err) { console.error('Contacto', err.message); return sendJson(res, err instanceof SyntaxError ? 400 : 500, { error: 'No se pudo enviar. Inténtalo de nuevo.' }); }
   }
 
   if (!validSession(req)) {
