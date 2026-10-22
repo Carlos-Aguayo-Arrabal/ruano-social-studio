@@ -796,6 +796,24 @@ document.querySelector('#photoInput').addEventListener('change',async e=>{
 });
 // ===== Reel automático 9:16 (1080x1920) grabado en el navegador con MediaRecorder =====
 const REEL_W=1080,REEL_H=1920,REEL_FPS=30,REEL_FADE=.5,REEL_OUTRO=3;
+function canEncodeReel(){return !!(window.VideoEncoder&&window.VideoFrame)}
+// Cede el turno sin el retraso de setTimeout (que el navegador frena en pestañas ocultas)
+function yieldUI(){return new Promise(r=>{const ch=new MessageChannel();ch.port1.onmessage=()=>r();ch.port2.postMessage(0)})}
+async function encodeReel(c,x,r,total,onProgress){
+ const {Muxer,ArrayBufferTarget}=await import('/vendor/mp4-muxer.mjs');
+ const base={width:REEL_W,height:REEL_H,bitrate:4_500_000,framerate:REEL_FPS,avc:{format:'avc'}};let config=null;
+ for(const codec of['avc1.640028','avc1.4d0028','avc1.42e028']){const t=await VideoEncoder.isConfigSupported({...base,codec}).catch(()=>null);if(t?.supported){config={...base,codec};break}}
+ if(!config)throw new Error('H.264 no disponible');
+ const muxer=new Muxer({target:new ArrayBufferTarget(),video:{codec:'avc',width:REEL_W,height:REEL_H,frameRate:REEL_FPS},fastStart:'in-memory'});
+ let fail=null;const enc=new VideoEncoder({output:(chunk,meta)=>muxer.addVideoChunk(chunk,meta),error:e=>{fail=e}});enc.configure(config);
+ const frames=Math.ceil(total*REEL_FPS),us=1e6/REEL_FPS;
+ for(let i=0;i<frames;i++){if(fail)throw fail;
+  drawReelFrame(x,Math.min(i/REEL_FPS,total-.001),r);
+  const f=new VideoFrame(c,{timestamp:Math.round(i*us),duration:Math.round(us)});enc.encode(f,{keyFrame:i%(REEL_FPS*2)===0});f.close();
+  while(enc.encodeQueueSize>6){await new Promise(res=>setTimeout(res,4))}
+  if(i%6===0){onProgress((i+1)/frames);await yieldUI()}}
+ await enc.flush();if(fail)throw fail;enc.close();muxer.finalize();onProgress(1);
+ return new Blob([muxer.target.buffer],{type:'video/mp4'})}
 function reelMime(){return['video/mp4;codecs=avc1.640028','video/mp4;codecs=avc1.4d002a','video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm'].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t))||''}
 function drawRoomLabel(x,label,w,top){const k=w/1080,pad=Math.round(w*.06);x.save();x.font=`700 ${Math.round(34*k)}px 'DM Sans',Arial`;const tw=x.measureText(label).width,h=Math.round(64*k),y=top+Math.round(34*k);
  x.fillStyle='rgba(255,255,255,.95)';reelRound(x,pad,y,tw+Math.round(76*k),h,h/2);x.fill();x.fillStyle=BRAND.color2;x.beginPath();x.arc(pad+Math.round(30*k),y+h/2,Math.round(8*k),0,Math.PI*2);x.fill();
@@ -877,9 +895,9 @@ function openReel(){if(photoState.images.length<2){showToast('Sube al menos 2 fo
  const n=photoState.images.length,sel=document.querySelector('#reelCount'),def=Math.min(n,12);sel.innerHTML=Array.from({length:Math.min(n,20)-1},(_,k)=>k+2).map(v=>`<option value="${v}"${v===def?' selected':''}>${v===n?`Todas (${v})`:`Las ${v} primeras`}</option>`).join('');
  document.querySelector('#reelOptions').hidden=false;document.querySelector('#reelStage').hidden=true;updateReelTotal();document.querySelector('#reelModal').classList.add('open')}
 function updateReelTotal(){const n=Number(document.querySelector('#reelCount').value),d=Number(document.querySelector('#reelSeconds').value),t=Math.round(n*d+REEL_OUTRO);
- document.querySelector('#reelTotal').textContent=`Duración: ${t} s${t>90?' · recomendable menos de 90 s':''} · se graba en tiempo real, mantén esta pestaña abierta.`}
+ document.querySelector('#reelTotal').textContent=`Duración: ${t} s${t>90?' · recomendable menos de 90 s':''}${canEncodeReel()?'':' · se graba en tiempo real, mantén esta pestaña abierta.'}`}
 function closeReel(){if(reelBusy)return;document.querySelector('#reelModal').classList.remove('open')}
-async function generateReel(){const mime=reelMime();if(!mime){showToast('Este navegador no puede grabar vídeo. Usa Chrome o Edge actualizados');return}
+async function generateReel(){const mime=reelMime();if(!mime&&!canEncodeReel()){showToast('Este navegador no puede grabar vídeo. Usa Chrome o Edge actualizados');return}
  reelBusy=true;const n=Number(document.querySelector('#reelCount').value),D=Number(document.querySelector('#reelSeconds').value),info=reelInfo(document.querySelector('#reelPrice').checked);
  document.querySelector('#reelOptions').hidden=true;const stage=document.querySelector('#reelStage');stage.hidden=false;document.querySelector('#reelDone').hidden=true;
  const status=document.querySelector('#reelStatus'),bar=document.querySelector('#reelBar'),screen=document.querySelector('#reelScreen');
@@ -887,6 +905,10 @@ async function generateReel(){const mime=reelMime();if(!mime){showToast('Este na
  try{await document.fonts?.ready;status.textContent='Preparando fotos…';const plates=[];
   for(let i=0;i<n;i++){plates.push(reelPlate(photoState.images[i],photoState.adjustments[i],document.querySelector('#reelAuto').checked));bar.style.width=`${(i+1)/n*15}%`;await new Promise(r=>setTimeout(r,0))}
   const r={plates,D,n,info,outroBg:reelOutroBg(plates[0]),labels:photoState.adjustments.slice(0,n).map(a=>a?.label||'')},total=n*D+REEL_OUTRO;drawReelFrame(x,0,r);
+  let blob=null;
+  // Fotograma a fotograma a 30 fps exactos: sin saltos aunque el equipo vaya lento o se cambie de pestaña
+  if(canEncodeReel()){try{status.textContent='Creando el reel…';blob=await encodeReel(c,x,r,total,k=>{bar.style.width=`${15+k*85}%`;status.textContent=`Creando el reel… ${Math.round(k*100)} %`})}catch(err){console.warn('Codificador no disponible, se graba en tiempo real',err);blob=null}}
+   if(!blob){
   const rec=new MediaRecorder(c.captureStream(REEL_FPS),{mimeType:mime,videoBitsPerSecond:4_500_000}),chunks=[];rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};const stopped=new Promise(res=>rec.onstop=res);
   rec.start(1000);const start=performance.now();status.textContent='Grabando el reel… no cambies de pestaña';
   // Si se cambia de pestaña, la grabación se pausa y sigue al volver (sin saltos en el vídeo).
@@ -902,7 +924,8 @@ async function generateReel(){const mime=reelMime();if(!mime){showToast('Este na
     drawReelFrame(x,t,r);bar.style.width=`${15+t/total*85}%`;next()};
    next()});
   await new Promise(res=>setTimeout(res,150));rec.stop();await stopped;
-  reelBlob=new Blob(chunks,{type:mime.split(';')[0]});if(reelUrl)URL.revokeObjectURL(reelUrl);reelUrl=URL.createObjectURL(reelBlob);
+  blob=new Blob(chunks,{type:mime.split(';')[0]})}
+  reelBlob=blob;if(reelUrl)URL.revokeObjectURL(reelUrl);reelUrl=URL.createObjectURL(reelBlob);
   const v=document.createElement('video');v.src=reelUrl;v.controls=true;v.playsInline=true;v.muted=true;screen.replaceChildren(v);v.play().catch(()=>{});
   const mb=(reelBlob.size/1048576).toFixed(1),isMp4=reelBlob.type==='video/mp4';
   status.textContent=isMp4?`Reel listo · ${Math.round(total)} s · ${mb} MB · MP4 1080×1920, listo para Instagram y Facebook.`:`Reel listo (${mb} MB), pero este navegador solo graba WebM: Instagram puede no aceptarlo. Actualiza Chrome para obtener MP4.`;

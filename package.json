@@ -11,6 +11,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.0.0"
+    "@anthropic-ai/sdk": "^1.0.0",
+    "mp4-muxer": "5.2.2"
   }
 }

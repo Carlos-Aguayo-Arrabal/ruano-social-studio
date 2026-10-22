@@ -18,6 +18,8 @@ if (!username || !password || !sessionSecret) {
 }
 
 const indexHtml = await readFile(join(__dirname, 'index.html'));
+// Librería para montar el MP4 del reel en el navegador (se sirve desde aquí, sin depender de un CDN)
+const mp4MuxerJs = await readFile(join(__dirname, 'node_modules', 'mp4-muxer', 'build', 'mp4-muxer.mjs')).catch(() => null);
 // Logo oficial de Ruano (va incrustado en index.html); se usa en la revisión si la marca no tiene otro
 const DEFAULT_LOGO = (indexHtml.toString('utf8').match(/id="officialLogo" src="(data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+)"/) || [])[1] || '';
 
@@ -726,6 +728,10 @@ load();
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname === '/vendor/mp4-muxer.mjs' && mp4MuxerJs) {
+    return send(res, 200, mp4MuxerJs, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400' });
+  }
 
   if (url.pathname === '/health') {
     return send(res, 200, 'ok', { 'Content-Type': 'text/plain; charset=utf-8' });
