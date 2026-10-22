@@ -144,7 +144,7 @@
       <div class="reel-body">
         <div class="reel-options" id="reelOptions">
           <p class="form-hint">Usa tus fotos en el orden de la galería, con sus ajustes, zoom suave y fundidos. Al principio muestra título y precio; al final, la referencia y el contacto. Sin música: añádela en Instagram al publicar (así puedes usar audios en tendencia).</p>
-          <div class="form-row"><label>Fotos a usar<select id="reelCount"></select></label><label>Segundos por foto<select id="reelSeconds"><option value="3">3 s · dinámico</option><option value="3.5" selected>3,5 s · recomendado</option><option value="4.5">4,5 s · pausado</option><option value="5.5">5,5 s · lujo / alto standing</option></select></label></div>
+          <div class="form-row"><label>Fotos a usar<select id="reelCount"></select></label><label>Segundos por foto<select id="reelSeconds"><option value="3.5">3,5 s · dinámico</option><option value="4.5" selected>4,5 s · recomendado</option><option value="5.5">5,5 s · pausado</option><option value="6.5">6,5 s · lujo / alto standing</option></select></label></div>
           <div class="toggle-row"><div><strong>Color automático</strong><small>Iguala tonos y aclara las fotos oscuras en el vídeo</small></div><label class="switch"><input id="reelAuto" type="checkbox" checked><span></span></label></div>
           <div class="toggle-row"><div><strong>Encabezado y pie corporativos</strong><small>Franja con el logo arriba y web, teléfono y referencia abajo, como en las fotos</small></div><label class="switch"><input id="reelFrame" type="checkbox" checked><span></span></label></div>
           <div class="toggle-row"><div><strong>Mostrar precio</strong><small>En la portada y en la etiqueta de la referencia</small></div><label class="switch"><input id="reelPrice" type="checkbox" checked><span></span></label></div>
@@ -796,7 +796,7 @@ document.querySelector('#photoInput').addEventListener('change',async e=>{
  if(ok)showToast(`${ok>1?ok+' fotografías cargadas':'Fotografía cargada'}${photoState.key?' y guardadas':'. Elige un inmueble para guardarlas'}`);
 });
 // ===== Reel automático 9:16 (1080x1920) grabado en el navegador con MediaRecorder =====
-const REEL_W=1080,REEL_H=1920,REEL_FPS=30,REEL_FADE=.9,REEL_OUTRO=3.5;
+const REEL_W=1080,REEL_H=1920,REEL_FPS=30,REEL_FADE=1.2,REEL_OUTRO=4;
 function canEncodeReel(){return !!(window.VideoEncoder&&window.VideoFrame)}
 // Cede el turno sin el retraso de setTimeout (que el navegador frena en pestañas ocultas)
 function yieldUI(){return new Promise(r=>{const ch=new MessageChannel();ch.port1.onmessage=()=>r();ch.port2.postMessage(0)})}
@@ -836,9 +836,9 @@ function reelWrap(x,text,maxW){const words=String(text).split(/\s+/),lines=[];le
 function reelRound(x,X,Y,W,H,r){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+W,Y,X+W,Y+H,r);x.arcTo(X+W,Y+H,X,Y+H,r);x.arcTo(X,Y+H,X,Y,r);x.arcTo(X,Y,X+W,Y,r);x.closePath()}
 const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2,clamp01=v=>Math.max(0,Math.min(1,v));
 function drawPlate(x,pl,i,p,alpha){x.globalAlpha=alpha;
- if(pl.mode==='pan'){p=clamp01(p);const z=1.04+.04*p,ch=pl.h/z,cw=Math.min(pl.w,ch*REEL_W/REEL_H),travel=pl.w-cw,from=travel*(i%2?.82:.18),to=travel*(i%2?.18:.82),sx=from+(to-from)*p,sy=(pl.h-ch)/2;
+ if(pl.mode==='pan'){p=clamp01(p);const z=1.03+.025*p,ch=pl.h/z,cw=Math.min(pl.w,ch*REEL_W/REEL_H),travel=pl.w-cw,from=travel*(i%2?.68:.32),to=travel*(i%2?.32:.68),sx=from+(to-from)*p,sy=(pl.h-ch)/2;
   x.drawImage(pl.src,sx,sy,cw,ch,0,0,REEL_W,REEL_H)}
- else{p=clamp01(p);const zIn=i%2===0,z=zIn?1.02+.07*p:1.09-.07*p,dir=i%4<2?1:-1,dx=dir*(z-1)*REEL_W*.45*(p-.5),w=REEL_W*z,h=REEL_H*z;x.drawImage(pl.src,(REEL_W-w)/2+dx,(REEL_H-h)/2,w,h)}
+ else{p=clamp01(p);const zIn=i%2===0,z=zIn?1.02+.045*p:1.065-.045*p,dir=i%4<2?1:-1,dx=dir*(z-1)*REEL_W*.45*(p-.5),w=REEL_W*z,h=REEL_H*z;x.drawImage(pl.src,(REEL_W-w)/2+dx,(REEL_H-h)/2,w,h)}
  x.globalAlpha=1}
 // Fondo del cierre: la primera foto desenfocada bajo el azul corporativo
 function reelOutroBg(pl){const c=document.createElement('canvas');c.width=REEL_W;c.height=REEL_H;const x=c.getContext('2d');drawPlate(x,pl,0,.5,1);
@@ -857,7 +857,7 @@ function drawReelBands(x,f){const W=REEL_W,H=REEL_H;x.save();x.globalAlpha=1;
  if(f.ref){x.textAlign='right';x.font="700 34px 'DM Sans',Arial";x.fillText(f.ref,W-56,y+f.foot/2)}
  x.restore()}
 function drawReelFrame(x,t,r){const {plates,D,n,info}=r,total=n*D+REEL_OUTRO,photoEnd=n*D;x.clearRect(0,0,REEL_W,REEL_H);
- const F=Math.min(REEL_FADE,D*.4),span=k=>{const a=k*D-(k?F:0),b=(k+1)*D+(k===n-1?F:0);return[a,b]},prog=(k,tm)=>{const[a,b]=span(k);return clamp01((tm-a)/(b-a))};
+ const F=Math.min(REEL_FADE,D*.3),span=k=>{const a=k*D-(k?F:0),b=(k+1)*D+(k===n-1?F:0);return[a,b]},prog=(k,tm)=>{const[a,b]=span(k);return clamp01((tm-a)/(b-a))};
  if(t<photoEnd+F){const tt=Math.min(t,photoEnd-.001),i=Math.floor(tt/D),local=tt-i*D;
   drawPlate(x,plates[i],i,prog(i,t),1);
   if(i<n-1&&local>D-F){const q=(local-(D-F))/F;drawPlate(x,plates[i+1],i+1,prog(i+1,t),ease(q))}
