@@ -455,6 +455,7 @@ function sendJson(res, status, data) {
 }
 
 async function handleApi(req, res, url, user) {
+  if (url.pathname.startsWith('/api/meta/') || url.pathname.startsWith('/api/media/')) return handleMeta(req, res, url, user);
   const deny = () => sendJson(res, 403, { error: 'No tienes acceso a esta empresa' });
   const brandParam = () => { const id = safeBrandId(url.searchParams.get('brand')); return id && canBrand(user, id) ? id : null; };
   if (url.pathname === '/api/me') return sendJson(res, 200, publicUser(user));
@@ -491,6 +492,7 @@ async function handleApi(req, res, url, user) {
           for (const item of c.upsert || []) {
             if (!item || !okId(item.id)) continue;
             const i = d[key].findIndex(x => String(x.id) === String(item.id));
+            if (i >= 0 && key === 'content') for (const f of META_FIELDS) if (d[key][i][f] != null && (item[f] == null || (f === 'metaStatus' && ['published', 'publishing'].includes(d[key][i][f]) && item[f] !== d[key][i][f]))) item[f] = d[key][i][f];
             if (i >= 0) d[key][i] = item; else if (key === 'content') d[key].unshift(item); else d[key].unshift(item);
           }
         }
@@ -1170,6 +1172,253 @@ async function backupNow() {
 setTimeout(() => backupNow().catch(err => console.error('Copia de seguridad', err.message)), 60_000).unref();
 setInterval(() => backupNow().catch(err => console.error('Copia de seguridad', err.message)), 24 * 3600_000).unref();
 
+
+// ═══ Meta (Instagram y Facebook): conexión, medios de cada publicación, publicar y programar ═══
+// Variables: META_APP_ID, META_APP_SECRET (de la app de Meta), PUBLIC_URL (por defecto https://studio.momentundigital.com).
+// META_GRAPH_URL solo sirve para pruebas con un Meta simulado.
+const META_VERSION = process.env.META_GRAPH_VERSION || 'v23.0';
+const GRAPH = (process.env.META_GRAPH_URL || `https://graph.facebook.com/${META_VERSION}`).replace(/\/$/, '');
+const META_DIALOG = process.env.META_DIALOG_URL || `https://www.facebook.com/${META_VERSION}/dialog/oauth`;
+const metaConfigured = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET);
+const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://studio.momentundigital.com').replace(/\/$/, '');
+const META_SCOPES = 'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,business_management';
+const metaDir = join(dataDir, 'meta'), mediaDir = join(dataDir, 'media');
+await mkdir(metaDir, { recursive: true }); await mkdir(mediaDir, { recursive: true });
+const safeKey = k => (/^[A-Za-z0-9_-]{1,40}$/.test(String(k || '')) ? String(k) : null);
+async function readMeta(brandId) { try { return JSON.parse(await readFile(join(metaDir, `${brandId}.json`), 'utf8')); } catch { return null; } }
+const writeMeta = (brandId, m) => writeAtomic(join(metaDir, `${brandId}.json`), JSON.stringify(m));
+const metaPublic = m => m ? { connected: !!m.selected, user: m.user || '', selected: m.selected || null, pages: (m.pages || []).map(x => ({ id: x.id, name: x.name, igId: x.igId || null, igUsername: x.igUsername || null })), connectedAt: m.connectedAt } : { connected: false, pages: [] };
+async function graph(method, path, params = {}) {
+  const url = new URL(`${GRAPH}/${path.replace(/^\//, '')}`);
+  const opt = { method };
+  if (method === 'GET') Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, typeof v === 'object' ? JSON.stringify(v) : v));
+  else opt.body = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)]));
+  const r = await fetch(url, opt);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) throw new Error(j.error?.error_user_msg || j.error?.message || `Meta respondió ${r.status}`);
+  return j;
+}
+// Medios: imágenes y vídeo listos para publicar, guardados por publicación
+async function mediaList(brandId, key) {
+  const files = (await readdir(join(mediaDir, brandId, key)).catch(() => [])).filter(f => /^\d{1,2}\.(jpg|mp4)$/.test(f)).sort((a, b) => parseInt(a) - parseInt(b));
+  return files.map(f => ({ file: f, type: f.endsWith('.mp4') ? 'video' : 'image' }));
+}
+const mediaSig = (brandId, key, file, exp) => sign(`media|${brandId}|${key}|${file}|${exp}`);
+const publicMediaUrl = (brandId, key, file) => { const exp = Date.now() + 24 * 3600_000; return `${PUBLIC_URL}/m/${brandId}/${key}/${file}?e=${exp}&s=${mediaSig(brandId, key, file, exp)}`; };
+async function handlePublicMedia(req, res, url) {
+  const m = url.pathname.match(/^\/m\/([A-Za-z0-9_-]{1,40})\/([A-Za-z0-9_-]{1,40})\/(\d{1,2}\.(?:jpg|mp4))$/);
+  const exp = Number(url.searchParams.get('e'));
+  if (!m || !(exp > Date.now()) || !safeEqual(url.searchParams.get('s') || '', mediaSig(m[1], m[2], m[3], exp))) return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain' });
+  try { return send(res, 200, await readFile(join(mediaDir, m[1], m[2], m[3])), { 'Content-Type': m[3].endsWith('.mp4') ? 'video/mp4' : 'image/jpeg', 'Cache-Control': 'private, max-age=600' }); }
+  catch { return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain' }); }
+}
+// Hora de Madrid → instante real (tiene en cuenta el horario de verano)
+function madridToMs(date, time) {
+  const [y, mo, d] = String(date).split('-').map(Number), [h, mi] = String(time || '13:00').split(':').map(Number);
+  if (!y || !mo || !d) return NaN;
+  const guess = Date.UTC(y, mo - 1, d, h || 0, mi || 0);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Madrid', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(guess)).map(x => [x.type, x.value]));
+  const asMadrid = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+  return guess - (asMadrid - guess);
+}
+const META_FIELDS = ['metaStatus', 'metaError', 'metaLinks', 'metaAt', 'publishedAt', 'metaVerified', 'mediaCleaned'];
+async function updateItem(brandId, id, changes) {
+  await withLock('store', async () => {
+    const st = await readStore(), it = (st.data[brandId]?.content || []).find(x => String(x.id) === String(id));
+    if (!it) return;
+    Object.assign(it, changes, { updatedAt: Date.now() });
+    await writeStore(st);
+  });
+}
+async function waitContainer(id, token) {
+  for (let i = 0; i < 60; i++) {
+    const r = await graph('GET', id, { fields: 'status_code,status', access_token: token });
+    if (r.status_code === 'FINISHED') return;
+    if (r.status_code === 'ERROR' || r.status_code === 'EXPIRED') throw new Error(`Meta no pudo procesar el vídeo (${r.status || r.status_code})`);
+    await new Promise(ok => setTimeout(ok, Number(process.env.META_POLL_MS || 5000)));
+  }
+  throw new Error('Meta tarda demasiado en procesar el vídeo');
+}
+const publishing = new Set();
+async function publishItem(brandId, item) {
+  const key = `${brandId}:${item.id}`;
+  if (publishing.has(key)) return;
+  publishing.add(key);
+  try {
+    const meta = await readMeta(brandId), page = meta?.pages?.find(x => x.id === meta.selected), token = meta?.tokens?.[meta?.selected];
+    if (!page || !token) throw new Error('La empresa no tiene Instagram/Facebook conectado');
+    const media = await mediaList(brandId, String(item.id));
+    if (!media.length) throw new Error('Faltan las imágenes o el vídeo: pulsa «Preparar medios»');
+    await updateItem(brandId, item.id, { metaStatus: 'publishing', metaError: '' });
+    const urls = media.map(m => ({ ...m, url: publicMediaUrl(brandId, String(item.id), m.file) }));
+    const images = urls.filter(m => m.type === 'image'), video = urls.find(m => m.type === 'video');
+    const caption = String(item.caption || '').slice(0, 2200), ch = String(item.channel || ''), links = {};
+    const toIG = /instagram/i.test(ch) && page.igId, toFB = /facebook/i.test(ch) || (!toIG && !/instagram/i.test(ch));
+    if (/instagram/i.test(ch) && !page.igId) throw new Error('La página de Facebook conectada no tiene una cuenta de Instagram profesional vinculada');
+    if (toIG) {
+      const ig = page.igId;
+      if (item.type === 'Reel') {
+        if (!video) throw new Error('Falta el vídeo del reel');
+        const c = await graph('POST', `${ig}/media`, { media_type: 'REELS', video_url: video.url, caption, share_to_feed: 'true', access_token: token });
+        await waitContainer(c.id, token);
+        links.instagram = (await graph('POST', `${ig}/media_publish`, { creation_id: c.id, access_token: token })).id;
+      } else if (item.type === 'Historia') {
+        const ids = [];
+        for (const m of (video ? [video] : images.slice(0, 5))) {
+          const c = await graph('POST', `${ig}/media`, { media_type: 'STORIES', [m.type === 'video' ? 'video_url' : 'image_url']: m.url, access_token: token });
+          if (m.type === 'video') await waitContainer(c.id, token);
+          ids.push((await graph('POST', `${ig}/media_publish`, { creation_id: c.id, access_token: token })).id);
+        }
+        links.instagram = ids.join(',');
+      } else if (images.length > 1) {
+        const children = [];
+        for (const m of images.slice(0, 10)) children.push((await graph('POST', `${ig}/media`, { image_url: m.url, is_carousel_item: 'true', access_token: token })).id);
+        const c = await graph('POST', `${ig}/media`, { media_type: 'CAROUSEL', children: children.join(','), caption, access_token: token });
+        links.instagram = (await graph('POST', `${ig}/media_publish`, { creation_id: c.id, access_token: token })).id;
+      } else {
+        if (!images[0]) throw new Error('Falta la imagen');
+        const c = await graph('POST', `${ig}/media`, { image_url: images[0].url, caption, access_token: token });
+        links.instagram = (await graph('POST', `${ig}/media_publish`, { creation_id: c.id, access_token: token })).id;
+      }
+    }
+    if (toFB && item.type !== 'Historia') {
+      if (video) links.facebook = (await graph('POST', `${page.id}/videos`, { file_url: video.url, description: caption, access_token: token })).id;
+      else if (images.length > 1) {
+        const ids = [];
+        for (const m of images.slice(0, 10)) ids.push((await graph('POST', `${page.id}/photos`, { url: m.url, published: 'false', access_token: token })).id);
+        links.facebook = (await graph('POST', `${page.id}/feed`, { message: caption, attached_media: ids.map(id => ({ media_fbid: id })), access_token: token })).id;
+      } else links.facebook = (await graph('POST', `${page.id}/photos`, { url: images[0].url, message: caption, access_token: token })).post_id || null;
+    }
+    // Comprobación: se pide a Meta el enlace de cada publicación para confirmar que existe
+    const permalinks = {};
+    if (links.instagram) { try { permalinks.instagram = (await graph('GET', String(links.instagram).split(',')[0], { fields: 'permalink', access_token: token })).permalink || ''; } catch {} }
+    if (links.facebook) { try { permalinks.facebook = (await graph('GET', links.facebook, { fields: 'permalink_url', access_token: token })).permalink_url || ''; } catch {} }
+    await updateItem(brandId, item.id, { metaStatus: 'published', metaError: '', metaLinks: { ...links, permalinks }, metaVerified: !!(permalinks.instagram || permalinks.facebook), metaAt: Date.now(), status: 'published', publishedAt: Date.now() });
+    console.log('Publicado en Meta', brandId, item.id, JSON.stringify(links));
+  } catch (err) {
+    console.error('Error al publicar en Meta', brandId, item.id, err.message);
+    await updateItem(brandId, item.id, { metaStatus: 'error', metaError: String(err.message).slice(0, 300) }).catch(() => {});
+  } finally { publishing.delete(key); }
+}
+// Programador: cada minuto publica lo aprobado cuya hora ya ha llegado
+async function metaScheduler() {
+  if (!metaConfigured()) return;
+  const st = await readStore();
+  for (const b of st.brands) {
+    const meta = await readMeta(b.id);
+    if (!meta?.selected) continue;
+    for (const it of brandDataOf(st, b.id).content || []) {
+      if (it.metaStatus === 'published' && it.metaVerified && !it.mediaCleaned && (it.metaAt || 0) < Date.now() - 7 * 864e5) {
+        await rm(join(mediaDir, b.id, String(it.id)), { recursive: true, force: true }); await updateItem(b.id, it.id, { mediaCleaned: true }); continue;
+      }
+      if (!it.autoPublish || ['published', 'publishing'].includes(it.metaStatus) || it.status === 'published' || !['approved', 'scheduled'].includes(it.status)) continue;
+      if (it.metaStatus === 'error' && (it.metaAt || 0) > Date.now() - 6 * 3600_000) continue; // tras un error no se reintenta sin parar
+      const due = madridToMs(it.date, it.time);
+      if (due <= Date.now() && due > Date.now() - 3 * 864e5) publishItem(b.id, it);
+    }
+  }
+}
+setInterval(() => metaScheduler().catch(err => console.error('Programador Meta', err.message)), 60_000).unref();
+
+async function handleMeta(req, res, url, user) {
+  const deny = () => sendJson(res, 403, { error: 'No tienes acceso a esta empresa' });
+  // Medios de una publicación
+  const mm = url.pathname.match(/^\/api\/media\/([A-Za-z0-9_-]{1,40})\/([A-Za-z0-9_-]{1,40})(?:\/(\d{1,2}\.(?:jpg|mp4)))?$/);
+  if (mm) {
+    const [, brandId, key, file] = mm;
+    if (!canBrand(user, brandId)) return deny();
+    const dir = join(mediaDir, brandId, key);
+    if (file && req.method === 'GET') { try { return send(res, 200, await readFile(join(dir, file)), { 'Content-Type': file.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg', 'Cache-Control': 'private, max-age=60' }); } catch { return sendJson(res, 404, { error: 'No encontrado' }); } }
+    if (!file && req.method === 'GET') return sendJson(res, 200, (await mediaList(brandId, key)).map(m => ({ ...m, url: `/api/media/${brandId}/${key}/${m.file}` })));
+    if (!file && req.method === 'DELETE') { await rm(dir, { recursive: true, force: true }); return sendJson(res, 200, { ok: true }); }
+    if (!file && req.method === 'PUT') {
+      const i = Number(url.searchParams.get('i')), video = url.searchParams.get('type') === 'video';
+      if (!(i >= 0 && i < 20)) return sendJson(res, 400, { error: 'Posición no válida' });
+      const body = await readRaw(req, video ? 120 * 1024 * 1024 : 8 * 1024 * 1024);
+      const isJpg = body[0] === 0xff && body[1] === 0xd8, isMp4 = body.toString('ascii', 4, 8) === 'ftyp';
+      if (video ? !isMp4 : !isJpg) return sendJson(res, 400, { error: video ? 'El vídeo debe ser MP4' : 'La imagen debe ser JPG' });
+      await mkdir(dir, { recursive: true });
+      for (const old of await mediaList(brandId, key)) if (parseInt(old.file) === i) await unlink(join(dir, old.file)).catch(() => {});
+      await writeFile(join(dir, `${i}.${video ? 'mp4' : 'jpg'}`), body);
+      return sendJson(res, 200, { ok: true, bytes: body.length });
+    }
+    return sendJson(res, 405, { error: 'Método no permitido' });
+  }
+  const brandId = safeBrandId(url.searchParams.get('brand'));
+  if (url.pathname === '/api/meta/status') {
+    if (!brandId || !canBrand(user, brandId)) return deny();
+    return sendJson(res, 200, { configured: metaConfigured(), ...metaPublic(await readMeta(brandId)) });
+  }
+  if (url.pathname === '/api/meta/connect') {
+    if (!brandId || !canBrand(user, brandId)) return deny();
+    if (!metaConfigured()) return sendJson(res, 400, { error: 'Falta configurar la app de Meta (META_APP_ID y META_APP_SECRET) en el servidor' });
+    const state = `${brandId}.${user.id}.${Date.now()}`;
+    const dialog = new URL(META_DIALOG);
+    Object.entries({ client_id: process.env.META_APP_ID, redirect_uri: `${PUBLIC_URL}/api/meta/callback`, state: `${state}.${sign(state)}`, scope: META_SCOPES, response_type: 'code' }).forEach(([k, v]) => dialog.searchParams.set(k, v));
+    res.writeHead(302, { Location: dialog.toString() });
+    return res.end();
+  }
+  if (url.pathname === '/api/meta/callback') {
+    const back = msg => { res.writeHead(302, { Location: `/#meta=${encodeURIComponent(msg)}` }); return res.end(); };
+    const [bId, uid, ts, sig] = String(url.searchParams.get('state') || '').split('.');
+    if (!sig || !safeEqual(sig, sign(`${bId}.${uid}.${ts}`)) || Date.now() - Number(ts) > 30 * 60_000 || uid !== user.id || !canBrand(user, bId)) return back('error:El enlace de conexión ha caducado. Vuelve a intentarlo.');
+    if (url.searchParams.get('error')) return back('error:Has cancelado la conexión con Meta.');
+    try {
+      const redirect_uri = `${PUBLIC_URL}/api/meta/callback`;
+      const short = await graph('GET', 'oauth/access_token', { client_id: process.env.META_APP_ID, client_secret: process.env.META_APP_SECRET, redirect_uri, code: url.searchParams.get('code') });
+      const long = await graph('GET', 'oauth/access_token', { grant_type: 'fb_exchange_token', client_id: process.env.META_APP_ID, client_secret: process.env.META_APP_SECRET, fb_exchange_token: short.access_token });
+      const me = await graph('GET', 'me', { fields: 'name', access_token: long.access_token });
+      const acc = await graph('GET', 'me/accounts', { fields: 'id,name,access_token,instagram_business_account{id,username}', limit: 100, access_token: long.access_token });
+      const pages = (acc.data || []).map(p => ({ id: p.id, name: p.name, igId: p.instagram_business_account?.id || null, igUsername: p.instagram_business_account?.username || null }));
+      if (!pages.length) return back('error:Tu usuario de Facebook no administra ninguna página. Crea o vincula la página de la empresa e inténtalo de nuevo.');
+      const tokens = Object.fromEntries((acc.data || []).map(p => [p.id, p.access_token]));
+      const selected = pages.length === 1 ? pages[0].id : (pages.find(p => p.igId)?.id && pages.filter(p => p.igId).length === 1 ? pages.find(p => p.igId).id : null);
+      await writeMeta(bId, { user: me.name || '', pages, tokens, selected, connectedAt: Date.now() });
+      return back(selected ? 'ok:Conectado' : 'elegir:Elige qué página usar');
+    } catch (err) { console.error('Conexión Meta', err.message); return back(`error:${err.message}`); }
+  }
+  if (url.pathname === '/api/meta/select' && req.method === 'POST') {
+    if (!brandId || !canBrand(user, brandId)) return deny();
+    const body = JSON.parse((await readRaw(req, 2048)).toString('utf8') || '{}'), meta = await readMeta(brandId);
+    if (!meta?.pages?.some(p => p.id === body.pageId)) return sendJson(res, 400, { error: 'Página no válida' });
+    meta.selected = body.pageId; await writeMeta(brandId, meta);
+    return sendJson(res, 200, metaPublic(meta));
+  }
+  if (url.pathname === '/api/meta/disconnect' && req.method === 'POST') {
+    if (!brandId || !canBrand(user, brandId)) return deny();
+    await rm(join(metaDir, `${brandId}.json`), { force: true });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === '/api/meta/publish' && req.method === 'POST') {
+    if (!brandId || !canBrand(user, brandId)) return deny();
+    const body = JSON.parse((await readRaw(req, 2048)).toString('utf8') || '{}');
+    const it = (brandDataOf(await readStore(), brandId).content || []).find(x => String(x.id) === String(body.contentId));
+    if (!it) return sendJson(res, 404, { error: 'Publicación no encontrada' });
+    if (it.metaStatus === 'published') return sendJson(res, 400, { error: 'Ya está publicada' });
+    publishItem(brandId, it);
+    return sendJson(res, 202, { ok: true });
+  }
+  if (url.pathname === '/api/meta/unpublish' && req.method === 'POST') {
+    if (!brandId || !canBrand(user, brandId)) return deny();
+    const body = JSON.parse((await readRaw(req, 2048)).toString('utf8') || '{}');
+    const it = (brandDataOf(await readStore(), brandId).content || []).find(x => String(x.id) === String(body.contentId));
+    if (!it || it.metaStatus !== 'published') return sendJson(res, 400, { error: 'Esta publicación no está publicada desde la app' });
+    const meta = await readMeta(brandId), token = meta?.tokens?.[meta?.selected];
+    if (!token) return sendJson(res, 400, { error: 'La empresa no tiene Instagram/Facebook conectado' });
+    const done = [], failed = [];
+    if (it.metaLinks?.facebook) { try { await graph('DELETE', it.metaLinks.facebook, { access_token: token }); done.push('facebook'); } catch (err) { failed.push(`Facebook: ${err.message}`); } }
+    for (const id of String(it.metaLinks?.instagram || '').split(',').filter(Boolean)) {
+      try { await graph('DELETE', id, { access_token: token }); if (!done.includes('instagram')) done.push('instagram'); }
+      catch (err) { failed.push(`Instagram no permite borrarla desde fuera de su app (${err.message}). Ábrela con el enlace y bórrala desde Instagram.`); break; }
+    }
+    const keep = { ...(it.metaLinks || {}) }; if (done.includes('facebook')) delete keep.facebook; if (done.includes('instagram')) delete keep.instagram;
+    const left = keep.facebook || keep.instagram;
+    await updateItem(brandId, it.id, left ? { metaLinks: keep, metaError: failed.join(' · ') } : { metaStatus: 'removed', metaLinks: {}, metaVerified: false, metaError: '', status: 'approved', autoPublish: false });
+    return sendJson(res, failed.length ? 207 : 200, { removed: done, errors: failed, permalinks: it.metaLinks?.permalinks || {} });
+  }
+  return sendJson(res, 404, { error: 'No encontrado' });
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -1236,6 +1485,7 @@ const server = http.createServer(async (req, res) => {
     catch (err) { console.error('Revisión', err.message); return sendJson(res, err instanceof SyntaxError ? 400 : 500, { error: 'No se pudo completar' }); }
   }
   // Web pública de la inmobiliaria (inmuebles y página de enlaces) y formulario de contacto
+  if (url.pathname.startsWith('/m/') && req.method === 'GET') return handlePublicMedia(req, res, url);
   if (url.pathname.startsWith('/w/') && req.method === 'GET') {
     try { return await handleWeb(req, res, url); }
     catch (err) { console.error('Web', err.message); return send(res, 500, 'No se pudo cargar la página', { 'Content-Type': 'text/plain; charset=utf-8' }); }
