@@ -10,7 +10,7 @@ export const root = fileURLToPath(new URL('../', import.meta.url));
 export const photo = await readFile(new URL('./fixtures/photo.jpg', import.meta.url));
 export async function fixture({ store: custom, start = true, runtime = {} } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'ruano-security-'));
-  const password = randomBytes(24).toString('hex');
+  const password = randomBytes(24).toString('hex'), sessionSecret = randomBytes(48).toString('hex');
   const store = custom || { version: 2, v: 1,
     brands: [{ id: 'b', name: 'Test B', color: '#123456', color2: '#123456', webId: 'bbbbbbbbbbbbbbbb', reviewToken: '222222222222222222222222' },
       { id: 'a', name: 'Test A', color: '#123456', color2: '#123456', webId: 'aaaaaaaaaaaaaaaa', reviewToken: '111111111111111111111111' }],
@@ -21,7 +21,7 @@ export async function fixture({ store: custom, start = true, runtime = {} } = {}
   const launch = async () => {
     // Deliberately do not inherit provider credentials or production configuration.
     child = spawn(process.execPath, ['server.mjs'], { cwd: root,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: dir, NODE_ENV: 'development', APP_USERNAME: 'testowner', APP_PASSWORD: password, APP_SESSION_SECRET: randomBytes(48).toString('hex'), OLLAMA_URL: 'http://127.0.0.1:1', ...runtime },
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: dir, NODE_ENV: 'development', APP_USERNAME: 'testowner', APP_PASSWORD: password, APP_SESSION_SECRET: sessionSecret, OLLAMA_URL: 'http://127.0.0.1:1', ...runtime },
       stdio: ['ignore', 'pipe', 'pipe'] });
     logs = '';
     child.stdout.on('data', b => { logs += b; }); child.stderr.on('data', b => { logs += b; });
@@ -40,8 +40,8 @@ export async function fixture({ store: custom, start = true, runtime = {} } = {}
   };
   const close = async () => { await stop(); await rm(dir, { recursive: true, force: true }); };
   const request = (path, cookie = '', options = {}) => fetch(origin + path, { redirect: 'manual', ...options, headers: { ...(cookie ? { Cookie: cookie } : {}), ...options.headers } });
-  const login = async (username = 'testa') => {
-    const r = await request('/login', '', { method: 'POST', body: new URLSearchParams({ username, password }) });
+  const login = async (username = 'testa', loginPassword = password) => {
+    const r = await request('/login', '', { method: 'POST', body: new URLSearchParams({ username, password:loginPassword }) });
     assert.equal(r.status, 303); assert.equal(r.headers.get('location'), '/');
     return r.headers.get('set-cookie').split(';')[0];
   };

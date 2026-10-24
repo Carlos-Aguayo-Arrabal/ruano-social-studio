@@ -68,3 +68,20 @@ test('frontend still uploads, reloads and edits photos with explicit brand URLs'
     assert.deepEqual(errors, []);
   } finally { await browser?.close(); await f.close(); }
 });
+
+test('browser logout rejects a copied cookie; independent B session survives a server restart',async()=>{
+ const f=await fixture();let browser;
+ try{
+  const a=await f.login(),b=await f.login('testb');browser=await chromium.launch({executablePath,headless:true});
+  const contextA=await browser.newContext(),contextB=await browser.newContext();
+  for(const [context,cookie] of [[contextA,a],[contextB,b]])await context.addCookies([{name:'ruano_session',value:cookie.slice(cookie.indexOf('=')+1),url:f.origin,httpOnly:true}]);
+  const pageA=await contextA.newPage(),pageB=await contextB.newPage();
+  for(const p of [pageA,pageB])await p.route('**/*',r=>r.request().url().startsWith(f.origin+'/')?r.continue():r.abort());
+  await pageA.goto(f.origin+'/logout');assert.equal(new URL(pageA.url()).pathname,'/login');
+  await contextA.addCookies([{name:'ruano_session',value:a.slice(a.indexOf('=')+1),url:f.origin,httpOnly:true}]);
+  await pageA.goto(f.origin);assert.equal(new URL(pageA.url()).pathname,'/login');
+  await f.stop();await f.launch();
+  await pageA.goto(f.origin);assert.equal(new URL(pageA.url()).pathname,'/login');
+  await pageB.goto(f.origin);await pageB.waitForFunction(()=>serverReady);assert.equal(await pageB.evaluate(()=>fetch('/api/me').then(r=>r.status)),200);
+ }finally{await browser?.close();await f.close()}
+});

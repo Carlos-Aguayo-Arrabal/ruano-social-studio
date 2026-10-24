@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { SessionStore } from './lib/sessions.mjs';
 import { resourceId, parseCookies, normalizeContent, trustedMutation } from './lib/security.mjs';
 import crypto from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, unlink, copyFile, readdir, rm } from 'node:fs/promises';
@@ -88,7 +89,21 @@ const hashPassword = (pw, salt) => new Promise((ok, ko) => crypto.scrypt(String(
 const OWNER = { id: 'owner', username, name: 'Administrador', role: 'admin', brands: [] };
 const canBrand = (user, id) => !!user && (user.role === 'admin' || (user.brands || []).includes(id));
 const publicUser = u => ({ id: u.id, username: u.username, name: u.name || u.username, role: u.role, brands: u.brands || [], disabled: !!u.disabled, owner: u.id === 'owner' });
-async function saveUsers(list) { usersCache = list; await writeAtomic(usersFile, JSON.stringify(list, null, 1)); }
+function sessionBinding(u) {
+  return crypto.createHmac('sha256',sessionSecret).update(JSON.stringify(u.id==='owner'
+    ? {uid:u.id,username,password,role:'admin'}
+    : {uid:u.id,username:u.username,pv:u.pv||0,hash:u.hash,role:u.role,brands:[...(u.brands||[])].sort(),disabled:!!u.disabled})).digest('hex');
+}
+const sessionUser = id => id==='owner'?OWNER:usersCache.find(u=>u.id===id&&!u.disabled);
+const bindingFor = id => {const u=sessionUser(id);return u?sessionBinding(u):null;};
+const sessions = await SessionStore.open(join(dataDir,'sessions.json'));
+await sessions.prune(bindingFor);
+setInterval(()=>sessions.prune(bindingFor).catch(()=>console.error('Limpieza de sesiones no disponible')),60_000).unref();
+async function saveUsers(list) {
+  const invalid=usersCache.filter(old=>!list.some(u=>u.id===old.id&&sessionBinding(u)===sessionBinding(old))).map(u=>u.id);
+  await writeAtomic(usersFile,JSON.stringify(list,null,1));usersCache=list;
+  if(invalid.length)await sessions.revokeUsers(invalid);
+}
 async function authenticate(u, pw) {
   if (safeEqual(u, username) && safeEqual(pw, password)) return OWNER;
   const user = usersCache.find(x => x.username.toLowerCase() === String(u).toLowerCase() && !x.disabled);
@@ -439,7 +454,7 @@ async function handleAi(req, res, url, user) {
 
 const writeManifest = (brand, ref, manifest) =>
   writeAtomic(join(photoDir(brand, ref), 'index.json'), JSON.stringify(manifest));
-const sessionDurationMs = 12 * 60 * 60 * 1000;
+
 
 function securityHeaders(extra = {}) {
   return {
@@ -515,12 +530,18 @@ async function handleApi(req, res, url, user) {
 
   // Usuarios (solo administradores)
   if (url.pathname === '/api/users' || url.pathname.startsWith('/api/users/')) {
-    if (user.role !== 'admin') return sendJson(res, 403, { error: 'Solo un administrador puede gestionar usuarios' });
+    return withLock('users',async()=>{
+    const user=currentUser(req);
+    if (user?.role !== 'admin') return sendJson(res, 403, { error: 'Solo un administrador puede gestionar usuarios' });
     const um = url.pathname.match(/^\/api\/users(?:\/([a-f0-9]{12}))?$/);
     if (!um) return sendJson(res, 404, { error: 'No encontrado' });
     if (!um[1] && req.method === 'GET') return sendJson(res, 200, [publicUser(OWNER), ...usersCache.map(publicUser)]);
     const body = req.method === 'DELETE' ? {} : JSON.parse((await readRaw(req, 8192)).toString('utf8') || '{}');
-    const st = await readStore(), validBrands = (body.brands || []).filter(id => st.brands.some(b => b.id === id));
+    if(body.role!=null&&!['admin','agency'].includes(body.role))return sendJson(res,400,{error:'Rol no válido'});
+    if(body.brands!=null&&!Array.isArray(body.brands))return sendJson(res,400,{error:'Empresas no válidas'});
+    const target=um[1]&&usersCache.find(u=>u.id===um[1]);
+    if(user.id!=='owner'&&(target?.role==='admin'||body.role==='admin'))return sendJson(res,403,{error:'Solo el propietario puede gestionar administradores globales'});
+    const st = await readStore(), validBrands = [...new Set((body.brands || []).filter(id => st.brands.some(b => b.id === id)))];
     const role = body.role === 'admin' ? 'admin' : 'agency';
     if (!um[1] && req.method === 'POST') {
       const uname = String(body.username || '').trim().toLowerCase();
@@ -542,15 +563,18 @@ async function handleApi(req, res, url, user) {
       if (body.name != null) u.name = clip(body.name, 60) || u.username;
       if (body.role) { u.role = role; }
       if (body.brands) u.brands = u.role === 'admin' ? [] : validBrands;
-      if (body.disabled != null) { u.disabled = !!body.disabled; u.pv = (u.pv || 0) + 1; }
+      if (body.disabled != null) u.disabled = !!body.disabled;
       if (body.password != null) {
         if (String(body.password).length < 8) return sendJson(res, 400, { error: 'La contraseña debe tener al menos 8 caracteres' });
-        u.salt = crypto.randomBytes(16).toString('hex'); u.hash = await hashPassword(body.password, u.salt); u.pv = (u.pv || 0) + 1;
+        u.salt = crypto.randomBytes(16).toString('hex'); u.hash = await hashPassword(body.password, u.salt);
       }
+      if(u.role==='admin')u.brands=[];
+      if(sessionBinding(u)!==sessionBinding(list[i]))u.pv=(u.pv||0)+1;
       list[i] = u; await saveUsers(list);
       return sendJson(res, 200, publicUser(u));
     }
     return sendJson(res, 405, { error: 'Método no permitido' });
+    });
   }
   // Contactos recibidos desde la web: listar, marcar como atendido o borrar
   if (url.pathname === '/api/stats' && req.method === 'GET') {
@@ -753,10 +777,7 @@ function sign(value) {
   return crypto.createHmac('sha256', sessionSecret).update(value).digest('base64url');
 }
 
-function createSession(user = OWNER) {
-  const payload = Buffer.from(JSON.stringify({ uid: user.id, user: user.username, pv: user.pv || 0, exp: Date.now() + sessionDurationMs })).toString('base64url');
-  return `${payload}.${sign(payload)}`;
-}
+async function createSession(user = OWNER) { return sessions.create(user.id,sessionBinding(user)); }
 
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a));
@@ -765,19 +786,8 @@ function safeEqual(a, b) {
 }
 
 function currentUser(req) {
-  const token = parseCookies(req).ruano_session;
-  if (!token) return null;
-  const [payload, signature] = token.split('.');
-  if (!payload || !signature || !safeEqual(signature, sign(payload))) return null;
-  try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    if (!(Number(data.exp) > Date.now())) return null;
-    if ((data.uid === 'owner' || !data.uid) && data.user === username) return OWNER;
-    const u = usersCache.find(x => x.id === data.uid && !x.disabled);
-    return u && (u.pv || 0) === (data.pv || 0) ? u : null; // al cambiar la contraseña se cierran sus sesiones
-  } catch {
-    return null;
-  }
+  const id=sessions.resolve(parseCookies(req).ruano_session,bindingFor);
+  return id?sessionUser(id):null;
 }
 const validSession = req => !!currentUser(req);
 
@@ -1770,6 +1780,7 @@ async function handleRequest(req, res) {
   }
 
   if (url.pathname === '/health') {
+    if(!sessions.healthy)return send(res,503,'unavailable',{'Content-Type':'text/plain; charset=utf-8'});
     return send(res, 200, 'ok', { 'Content-Type': 'text/plain; charset=utf-8' });
   }
 
@@ -1803,18 +1814,19 @@ async function handleRequest(req, res) {
       const secure = isProduction ? '; Secure' : '';
       res.writeHead(303, {
         Location: '/',
-        'Set-Cookie': `ruano_session=${encodeURIComponent(createSession(user))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${secure}`,
+        'Set-Cookie': `ruano_session=${encodeURIComponent(await createSession(user))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${secure}`,
       });
       return res.end();
-    } catch {
-      return send(res, 400, 'Petición no válida');
+    } catch(err) {
+      return send(res, [429,503].includes(err.status)?err.status:400, [429,503].includes(err.status)?err.message:'Petición no válida');
     }
   }
 
   if (url.pathname === '/logout') {
+    await sessions.revoke(parseCookies(req).ruano_session);
     res.writeHead(303, {
       Location: '/login',
-      'Set-Cookie': 'ruano_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0',
+      'Set-Cookie': `ruano_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction?'; Secure':''}`,
     });
     return res.end();
   }
@@ -1879,7 +1891,7 @@ const server = http.createServer((req, res) => {
   handleRequest(req, res).catch(err => {
     if (res.destroyed) return;
     if (res.headersSent) return res.destroy();
-    const status = err instanceof URIError || err instanceof TypeError ? 400 : 500;
+    const status = err.status===503?503:err instanceof URIError || err instanceof TypeError ? 400 : 500;
     console.error('Petición rechazada', err.name);
     sendJson(res, status, { error: status === 400 ? 'Petición no válida' : 'No se pudo completar la operación' });
   });

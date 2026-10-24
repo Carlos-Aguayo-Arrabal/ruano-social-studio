@@ -36,19 +36,25 @@ const login=await req('/login',{method:'POST',body:new URLSearchParams({username
 assert.equal(login.status,303);assert.match(login.headers.get('set-cookie'),/Secure/);assert.match(login.headers.get('set-cookie'),/HttpOnly/);
 const cookie=login.headers.get('set-cookie').split(';')[0];const headers={Cookie:cookie,'Content-Type':'application/json'};
 const photo=Buffer.from('${payload}','base64');`;
- await exec(common+`
+ const cookies=JSON.parse(await exec(common+`
 assert.match(process.version,/^v22\\./);assert.equal(process.getuid(),1000);
 const {writeFile}=await import('node:fs/promises');await writeFile('/app/data/permission-probe','synthetic');
 await assert.rejects(writeFile('/app/forbidden-probe','synthetic'));
 const sync=await req('/api/sync',{method:'POST',headers,body:JSON.stringify({brands:{upsert:[{id:'synthetic',name:'Synthetic Docker'}]},data:{synthetic:{properties:{upsert:[{id:101,title:'Synthetic property'}]}}}})});assert.equal(sync.status,200);
 const upload=await req('/api/photos/101?brand=synthetic',{method:'POST',headers:{Cookie:cookie},body:photo});assert.equal(upload.status,201);
-console.log('synthetic startup, permissions, authentication and upload verified');`);
+const second=await req('/login',{method:'POST',body:new URLSearchParams({username:process.env.APP_USERNAME,password:process.env.APP_PASSWORD})});
+const activeCookie=second.headers.get('set-cookie').split(';')[0];
+assert.equal((await req('/logout',{headers:{Cookie:cookie}})).status,303);
+assert.equal((await req('/api/me',{headers:{Cookie:cookie}})).status,401);
+console.log(JSON.stringify({revokedCookie:cookie,activeCookie}));`));
  await run(['restart',container]);await healthy();
  const result=await exec(common+`
+assert.equal((await req('/api/me',{headers:{Cookie:${JSON.stringify(cookies.revokedCookie)}}})).status,401);
+assert.equal((await req('/api/me',{headers:{Cookie:${JSON.stringify(cookies.activeCookie)}}})).status,200);
 const state=await(await req('/api/sync',{headers})).json();assert.equal(state.data.synthetic.properties[0].title,'Synthetic property');
 const manifest=await(await req('/api/photos/101?brand=synthetic',{headers})).json();assert.equal(manifest.photos.length,1);
 const bytes=Buffer.from(await(await req('/api/photos/101/'+manifest.photos[0].id+'?brand=synthetic',{headers})).arrayBuffer());assert.deepEqual(bytes,photo);
-console.log(JSON.stringify({node:process.version,uid:process.getuid(),health:true,authentication:true,volumePersistence:true,photoBytesAfterRestart:true,readOnlyRoot:true}));`);
+console.log(JSON.stringify({node:process.version,uid:process.getuid(),health:true,authentication:true,volumePersistence:true,photoBytesAfterRestart:true,readOnlyRoot:true,revocationAfterRestart:true,activeSessionAfterRestart:true}));`);
  const report={image,network:'none',publishedPorts:0,productionData:false,...JSON.parse(result)};
  await mkdir('artifacts',{recursive:true});await writeFile('artifacts/docker-results.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 }finally{
