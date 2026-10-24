@@ -58,3 +58,14 @@ publicar: [cambios, pruebas y riesgos](docs/security/phase-0.md) y
 [procedimiento offline de copia y recuperación](docs/security/photo-recovery.md).
 Las fotos nuevas se guardan por empresa en `DATA_DIR/photos-v2`; las antiguas no
 se borran, migran ni reasignan automáticamente al arrancar.
+
+
+### Fase 0.1 y staging controlado
+
+Nodemailer actualizado a 10.2.1; auditoría de dependencias bloqueante en CI.
+[Informe de fase 0.1](docs/security/phase-01.md),
+[checklist de staging](docs/security/staging-checklist.md) y
+[estado GitHub](docs/security/github-review-status.md).
+El smoke Docker usa únicamente contenedor/volumen sintéticos sin red:
+`node scripts/test-docker.mjs ruano-staging-check` tras construir esa imagen.
+No es un despliegue en Hostinger ni una autorización para operar fotografías reales.

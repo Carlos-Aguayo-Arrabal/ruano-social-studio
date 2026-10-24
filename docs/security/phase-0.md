@@ -1,5 +1,7 @@
 # Fase 0 de seguridad · 24/10/2026
 
+> Registro histórico de fase 0. El estado actual, correo actualizado, CI y Docker se documentan en [fase 0.1](phase-01.md). Las limitaciones antiguas no describen por sí solas la rama actual.
+
 Estado: cambios locales para revisión en `security/phase-0-2026-10-24`, sobre `6d94fa3e7a4995a5479253761925c53e8ea6e029`. No integrados en main, sin despliegue, sin credenciales reales y sin migrar fotografías reales.
 
 ## Evidencias previas a la corrección

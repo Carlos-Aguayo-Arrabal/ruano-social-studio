@@ -55,3 +55,22 @@ Para recuperación operativa: mantener servicios detenidos, conservar el directo
 - Backup original legible y restauración verificable fuera del volumen activo.
 
 La retención o eliminación del árbol antiguo no forma parte de esta fase. No ejecutar borrados por ahorrar espacio sin una decisión posterior y una copia recuperable.
+
+
+## Diagnósticos ampliados en fase 0.1
+
+Regenerar el plan con la versión revisada de la herramienta. Incluye `duplicateIds`
+para IDs repetidos entre marcas **y dentro de la misma marca**. `unresolved.reason`
+distingue `orphan`, `duplicate-property-id`, IDs/propietarios inválidos,
+`invalid-or-incomplete-manifest` y `unreferenced-files`. Un archivo que no aparece
+en el manifest impide asignar automáticamente todo ese directorio. No moverlo ni
+borrarlo por esa razón; requiere procedencia y recuperación individual revisadas.
+
+Los hashes del inventario se calculan por streaming; sigue siendo obligatorio
+disponer de espacio para copias completas. El runtime devuelve 503 ante un índice
+corrupto y no lo sustituye por uno vacío. Recuperar desde una copia verificada, no
+editar el índice a ciegas para hacer desaparecer el error.
+
+El ensayo específico para un proyecto/volumen nuevo está en
+[staging-checklist.md](staging-checklist.md); los resultados reales y límites están
+en [phase-01.md](phase-01.md). No se han operado datos de clientes.
