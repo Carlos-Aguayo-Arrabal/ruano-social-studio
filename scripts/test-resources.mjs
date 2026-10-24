@@ -12,11 +12,11 @@ const run=(args,input='')=>new Promise((resolve,reject)=>{const p=spawn('docker'
 let madeApp=false,madeVolume=false;
 const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',productionData:false,cases};
 const state=async()=>{const [running,oomKilled,exitCode]=(await run(['inspect','--format','{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}}',app])).split(' ');return {running:running==='true',oomKilled:oomKilled==='true',exitCode:Number(exitCode)};};
-async function memory(){try{const values=await run(['exec',app,'sh','-c',"cat /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.peak; awk '/^anon /{print $2}' /sys/fs/cgroup/memory.stat; awk '/^VmRSS:/{print $2*1024}' /proc/1/status"]);const [currentBytes,peakBytes,anonBytes,rssBytes]=values.split(/\s+/).map(Number);return {currentBytes,peakBytes,anonBytes,rssBytes,includesFileCache:true};}catch{return null}}
+async function memory(){try{const values=await run(['exec',app,'sh','-c',"for f in memory.current memory.peak memory.swap.current memory.swap.max; do cat /sys/fs/cgroup/$f; done; awk '/^anon /{print $2}' /sys/fs/cgroup/memory.stat; awk '/^VmRSS:/{print $2*1024}' /proc/1/status"]);const [currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,anonBytes,rssBytes]=values.split(/\s+/).map(Number);return {currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,anonBytes,rssBytes,includesFileCache:true};}catch{return null}}
 try{
  const env=join(tmp,'synthetic.env');await writeFile(env,['APP_USERNAME=capacity-owner','APP_PASSWORD='+randomBytes(24).toString('hex'),'APP_SESSION_SECRET='+randomBytes(48).toString('hex'),'OLLAMA_URL=http://127.0.0.1:1'].join('\n'),{mode:0o600});
  await run(['volume','create',volume]);madeVolume=true;
- await run(['create','--name',app,'--network','none','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--cpus','1','--pids-limit','128','--env-file',env,'--mount',`type=volume,source=${volume},target=/app/data`,'--health-interval','1s','--health-start-period','1s',image]);madeApp=true;await run(['start',app]);
+ await run(['create','--name',app,'--network','none','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--memory-swap','256m','--cpus','1','--pids-limit','128','--env-file',env,'--mount',`type=volume,source=${volume},target=/app/data`,'--health-interval','1s','--health-start-period','1s',image]);madeApp=true;await run(['start',app]);
  for(let i=0;i<40;i++){if(await run(['inspect','--format','{{.State.Health.Status}}',app])==='healthy')break;await new Promise(r=>setTimeout(r,500));}
  assert.equal(await run(['inspect','--format','{{.State.Health.Status}}',app]),'healthy');
  assert.equal(await run(['inspect','--format','{{.HostConfig.NetworkMode}}',app]),'none');
@@ -28,7 +28,7 @@ const cookie=login.headers.get('set-cookie').split(';')[0],headers={Cookie:cooki
 function body(bytes,video=false){return Readable.from((async function*(){let sent=0;const first=Buffer.alloc(Math.min(bytes,65536));if(video)first.write('ftyp',4);else{first[0]=255;first[1]=216;first[2]=255;}yield first;sent+=first.length;while(sent<bytes){const n=Math.min(65536,bytes-sent);yield Buffer.alloc(n);sent+=n;}})());}
 async function upload(path,bytes,video=false){const start=performance.now();try{const r=await req(path,{method:'PUT',headers,body:body(bytes,video),duplex:'half'});await r.arrayBuffer();return {status:r.status,ms:Math.round(performance.now()-start)};}catch(e){return {status:null,networkError:e.cause?.code||e.name,ms:Math.round(performance.now()-start)};}}`;
  await client(common+`const r=await req('/api/sync',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({brands:{upsert:[{id:'capacity',name:'Synthetic capacity'}]},data:{capacity:{properties:{upsert:[{id:101,title:'Synthetic'}]}}}})});assert.equal(r.status,200);`);
- report.baselineMemory=await memory();
+ report.baselineMemory=await memory();assert.equal(report.baselineMemory?.swapMaxBytes,0,"Swap must be disabled for capacity validation");
  const MiB=1024*1024;
  for(const [name,path,bytes,video,expected] of [
   ['photo-exact-4MiB','/api/photos/101/cover?brand=capacity',4*MiB,false,200],
@@ -48,6 +48,9 @@ async function upload(path,bytes,video=false){const start=performance.now();try{
   assert.ok(result.results.every(v=>[200,429].includes(v.status)));assert.ok(result.results.some(v=>v.status===200));const observed=await state();assert.equal(observed.running,true);assert.equal(observed.oomKilled,false);
   const item={name:'concurrent-256KiB-images',concurrency,...result,...observed,memory:await memory()};cases.push(item);console.log('::notice title=Resource concurrency::'+JSON.stringify(item));
  }
+ const concurrentVideos=JSON.parse(await client(common+`const start=performance.now();const results=await Promise.all(Array.from({length:2},(_,i)=>upload('/api/media/capacity/large-'+i+'?i=0&type=video',120*1024*1024,true)));console.log(JSON.stringify({results,totalMs:Math.round(performance.now()-start)}));`));
+ const videoState=await state(),videoCase={name:'concurrent-120MiB-videos',concurrency:2,...concurrentVideos,...videoState,memory:await memory()};cases.push(videoCase);console.log('::notice title=Resource videos::'+JSON.stringify(videoCase));
+ assert.equal(videoState.running,true,'Application terminated during concurrent valid videos');assert.equal(videoState.oomKilled,false,'OOM during concurrent videos');assert.ok(concurrentVideos.results.every(r=>[200,429].includes(r.status)));
  report.disk=JSON.parse(await run(['exec','-i',app,'node','--input-type=module'],`import {readdir,stat} from 'node:fs/promises';import {join} from 'node:path';let bytes=0,files=0;async function walk(p){for(const f of await readdir(p)){const q=join(p,f),s=await stat(q);if(s.isDirectory())await walk(q);else{files++;bytes+=s.size;}}}await walk('/app/data');console.log(JSON.stringify({files,bytes}));`));
  report.success=true;
 }catch(err){report.success=false;report.failure=err.message;if(madeApp)report.finalState=await state();process.exitCode=1;console.error('Resource validation failed:',err.message);}
