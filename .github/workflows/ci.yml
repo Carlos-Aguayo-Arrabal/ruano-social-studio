@@ -42,8 +42,10 @@ jobs:
         run: docker build -t ruano-staging-check .
       - name: Isolated startup, health, permissions and restart tests
         run: node scripts/test-docker.mjs ruano-staging-check
+      - name: Bounded synthetic file and concurrency resource tests
+        run: node scripts/test-resources.mjs ruano-staging-check
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: docker-synthetic-results
-          path: artifacts/docker-results.json
+          path: artifacts/*.json
