@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { resourceId, parseCookies, normalizeContent } from './lib/security.mjs';
 import crypto from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, unlink, copyFile, readdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,7 @@ if (!username || !password || !sessionSecret) {
 
 const indexHtml = await readFile(join(__dirname, 'index.html'));
 // Librería para montar el MP4 del reel en el navegador (se sirve desde aquí, sin depender de un CDN)
+const purifyJs = await readFile(join(__dirname, 'node_modules', 'dompurify', 'dist', 'purify.min.js'));
 const mp4MuxerJs = await readFile(join(__dirname, 'node_modules', 'mp4-muxer', 'build', 'mp4-muxer.mjs')).catch(() => null);
 // Logo oficial de Ruano (va incrustado en index.html); se usa en la revisión si la marca no tiene otro
 const DEFAULT_LOGO = (indexHtml.toString('utf8').match(/id="officialLogo" src="(data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+)"/) || [])[1] || '';
@@ -27,7 +29,14 @@ const DEFAULT_LOGO = (indexHtml.toString('utf8').match(/id="officialLogo" src="(
 // Datos persistentes: en producción /app/data es un volumen de Easypanel
 const dataDir = process.env.DATA_DIR || join(__dirname, 'data');
 const stateFile = join(dataDir, 'state.json');
+// Legacy files are retained untouched. Only the reviewed offline migration reads them.
 const photosDir = join(dataDir, 'photos');
+const scopedPhotosDir = join(dataDir, 'photos-v2');
+const photoDir = (brand, ref) => {
+  if (!resourceId(brand) || !resourceId(ref)) throw Object.assign(new Error('Recurso no válido'), { status: 400 });
+  return join(scopedPhotosDir, brand, String(ref));
+};
+await mkdir(scopedPhotosDir, { recursive: true });
 await mkdir(photosDir, { recursive: true });
 
 // Copia de seguridad del estado en cada arranque; se guardan las 10 últimas
@@ -71,12 +80,6 @@ async function readStore() {
 }
 async function writeStore(st) { st.v = (st.v || 0) + 1; st.savedAt = new Date().toISOString(); storeCache = st; await writeAtomic(storeFile, JSON.stringify(st)); }
 const brandDataOf = (st, id) => st.data[id] || { content: [], properties: [] };
-async function propertyBrand(propId) {
-  const st = await readStore();
-  for (const [id, d] of Object.entries(st.data)) if ((d.properties || []).some(p => String(p.id) === String(propId))) return id;
-  return null;
-}
-
 // ─── Usuarios: el administrador (APP_USERNAME/APP_PASSWORD) y los usuarios de cada agencia (users.json) ───
 const usersFile = join(dataDir, 'users.json');
 let usersCache = [];
@@ -94,7 +97,7 @@ async function authenticate(u, pw) {
 }
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 
-const safeRef = r => (/^[A-Za-z0-9_-]{1,40}$/.test(r || '') ? r : null);
+const safeRef = resourceId;
 const safeId = i => (/^[a-f0-9]{24}$/.test(i || '') ? i : null);
 
 // Serializa las escrituras por clave para que no se pisen
@@ -129,9 +132,9 @@ function readRaw(req, limit) {
   });
 }
 
-async function readManifest(ref) {
+async function readManifest(brand, ref) {
   try {
-    return JSON.parse(await readFile(join(photosDir, ref, 'index.json'), 'utf8'));
+    return JSON.parse(await readFile(join(photoDir(brand, ref), 'index.json'), 'utf8'));
   } catch {
     return { photos: [] };
   }
@@ -431,8 +434,8 @@ async function handleAi(req, res, url) {
   return sendJson(res, 404, { error: 'No encontrado' });
 }
 
-const writeManifest = (ref, manifest) =>
-  writeAtomic(join(photosDir, ref, 'index.json'), JSON.stringify(manifest));
+const writeManifest = (brand, ref, manifest) =>
+  writeAtomic(join(photoDir(brand, ref), 'index.json'), JSON.stringify(manifest));
 const sessionDurationMs = 12 * 60 * 60 * 1000;
 
 function securityHeaders(extra = {}) {
@@ -471,7 +474,7 @@ async function handleApi(req, res, url, user) {
     const body = JSON.parse((await readRaw(req, MAX_STATE_BYTES)).toString('utf8') || '{}');
     const result = await withLock('store', async () => {
       const st = await readStore(), denied = [];
-      const okId = id => /^[A-Za-z0-9_-]{1,40}$/.test(String(id ?? ''));
+      const okId = resourceId;
       for (const b of body.brands?.upsert || []) {
         if (!b || !safeBrandId(b.id)) continue;
         const i = st.brands.findIndex(x => x.id === b.id);
@@ -484,14 +487,15 @@ async function handleApi(req, res, url, user) {
         st.brands = st.brands.filter(x => x.id !== id); delete st.data[id];
       }
       for (const [bid, ch] of Object.entries(body.data || {})) {
-        if (!st.brands.some(b => b.id === bid) || !canBrand(user, bid)) { denied.push(bid); continue; }
+        if (!resourceId(bid) || !st.brands.some(b => b.id === bid) || !canBrand(user, bid)) { denied.push(bid); continue; }
         const d = (st.data[bid] ||= { content: [], properties: [] });
         for (const key of ['content', 'properties']) {
           const c = ch?.[key]; if (!c) continue;
           const list = (d[key] ||= []);
           const gone = new Set((c.remove || []).map(String));
           if (gone.size) d[key] = list.filter(x => !gone.has(String(x.id)));
-          for (const item of c.upsert || []) {
+          for (const rawItem of c.upsert || []) {
+            const item = key === 'content' ? normalizeContent(rawItem) : rawItem;
             if (!item || !okId(item.id)) continue;
             const i = d[key].findIndex(x => String(x.id) === String(item.id));
             if (i >= 0 && key === 'content') for (const f of META_FIELDS) if (d[key][i][f] != null && (item[f] == null || (f === 'metaStatus' && ['published', 'publishing'].includes(d[key][i][f]) && item[f] !== d[key][i][f]))) item[f] = d[key][i][f];
@@ -625,28 +629,33 @@ async function handleApi(req, res, url, user) {
   if (url.pathname.startsWith('/api/ai/')) return handleAi(req, res, url);
 
 
-  // /api/photo-counts?ids=a,b,c → { a: 17, b: 0 }
+  // Every photo API needs an explicit brand and a property belonging to it.
+  const photoBrand = safeBrandId(url.searchParams.get('brand'));
+  const st = await readStore();
+  const ownsBrand = photoBrand && st.brands.some(b => b.id === photoBrand) && canBrand(user, photoBrand);
   if (url.pathname === '/api/photo-counts') {
+    if (!ownsBrand) return deny();
+    const properties = brandDataOf(st, photoBrand).properties || [];
     const out = {};
     for (const raw of String(url.searchParams.get('ids') || '').split(',').slice(0, 300)) {
       const ref = safeRef(raw);
-      if (!ref) continue;
-      if (user.role !== 'admin') { const owner = await propertyBrand(ref); if (owner && !canBrand(user, owner)) continue; }
-      out[ref] = (await readManifest(ref)).photos?.length || 0;
+      if (!ref || !properties.some(p => String(p.id) === ref)) continue;
+      out[ref] = (await readManifest(photoBrand, ref)).photos?.length || 0;
     }
     return sendJson(res, 200, out);
   }
 
-  // /api/photos/:ref  y  /api/photos/:ref/:id(.webp|.jpg)
   const m = url.pathname.match(/^\/api\/photos\/([^/]+)(?:\/([^/.]+)(\.(?:jpg|webp))?)?$/);
   if (!m) return sendJson(res, 404, { error: 'No encontrado' });
   const ref = safeRef(decodeURIComponent(m[1]));
   if (!ref) return sendJson(res, 400, { error: 'Referencia no válida' });
-  const dir = join(photosDir, ref);
-  if (user.role !== 'admin') { const owner = await propertyBrand(ref); if (owner && !canBrand(user, owner)) return deny(); }
+  if (!ownsBrand) return deny();
+  if (!(brandDataOf(st, photoBrand).properties || []).some(p => String(p.id) === ref)) return sendJson(res, 404, { error: 'Inmueble no encontrado' });
+  const dir = photoDir(photoBrand, ref);
+  const photoLock = `photos:${photoBrand}:${ref}`;
 
   if (!m[2]) {
-    if (req.method === 'GET') return sendJson(res, 200, await readManifest(ref));
+    if (req.method === 'GET') return sendJson(res, 200, await readManifest(photoBrand, ref));
     if (req.method === 'POST') {
       const body = await readRaw(req, MAX_PHOTO_BYTES);
       // Se guardan en WebP (ocupa menos); JPG como alternativa para navegadores sin WebP
@@ -656,23 +665,23 @@ async function handleApi(req, res, url, user) {
       const id = crypto.randomBytes(12).toString('hex');
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, `${id}.${isWebp ? 'webp' : 'jpg'}`), body);
-      await withLock(ref, async () => {
-        const manifest = await readManifest(ref);
+      await withLock(photoLock, async () => {
+        const manifest = await readManifest(photoBrand, ref);
         manifest.photos.push({ id, adjust: null });
-        await writeManifest(ref, manifest);
+        await writeManifest(photoBrand, ref, manifest);
       });
       return sendJson(res, 201, { id, bytes: body.length });
     }
     if (req.method === 'PUT') {
       // Orden y ajustes; solo se aceptan fotos que ya existen
       const data = JSON.parse((await readRaw(req, 256 * 1024)).toString('utf8'));
-      const result = await withLock(ref, async () => {
-        const known = new Set((await readManifest(ref)).photos.map(p => p.id));
+      const result = await withLock(photoLock, async () => {
+        const known = new Set((await readManifest(photoBrand, ref)).photos.map(p => p.id));
         const photos = (Array.isArray(data.photos) ? data.photos : [])
           .filter(p => p && known.has(p.id))
           .map(p => ({ id: p.id, adjust: p.adjust && typeof p.adjust === 'object' ? p.adjust : null }));
         await mkdir(dir, { recursive: true });
-        await writeManifest(ref, { photos });
+        await writeManifest(photoBrand, ref, { photos });
         return photos.length;
       });
       return sendJson(res, 200, { ok: true, photos: result });
@@ -682,7 +691,7 @@ async function handleApi(req, res, url, user) {
 
   // Portada ya diseñada (logo, pie, título y precio) que la app sube al ver la foto 1
   if (m[2] === 'cover') {
-    if (req.method === 'GET') return sendCover(res, ref, 'private, max-age=60', url.searchParams.has('raw'));
+    if (req.method === 'GET') return sendCover(res, photoBrand, ref, 'no-store', url.searchParams.has('raw'));
     if (req.method === 'PUT') {
       const body = await readRaw(req, MAX_PHOTO_BYTES);
       const isJpg = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
@@ -696,22 +705,23 @@ async function handleApi(req, res, url, user) {
 
   const id = safeId(m[2]);
   if (!id) return sendJson(res, 400, { error: 'Foto no válida' });
+  if (!(await readManifest(photoBrand, ref)).photos.some(p => p.id === id)) return sendJson(res, 404, { error: 'Foto no encontrada' });
   if (req.method === 'GET') {
     for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
       try {
         return send(res, 200, await readFile(join(dir, `${id}.${ext}`)), {
           'Content-Type': type,
-          'Cache-Control': 'private, max-age=31536000, immutable',
+          'Cache-Control': 'no-store',
         });
       } catch {}
     }
     return sendJson(res, 404, { error: 'Foto no encontrada' });
   }
   if (req.method === 'DELETE') {
-    await withLock(ref, async () => {
-      const manifest = await readManifest(ref);
+    await withLock(photoLock, async () => {
+      const manifest = await readManifest(photoBrand, ref);
       manifest.photos = manifest.photos.filter(p => p.id !== id);
-      await writeManifest(ref, manifest);
+      await writeManifest(photoBrand, ref, manifest);
       await unlink(join(dir, `${id}.webp`)).catch(() => {});
       await unlink(join(dir, `${id}.jpg`)).catch(() => {});
     });
@@ -721,10 +731,10 @@ async function handleApi(req, res, url, user) {
 }
 
 // Portada diseñada si existe; si no, la primera foto del inmueble
-async function sendCover(res, ref, cache, raw = false) {
-  const manifest = await readManifest(ref);
+async function sendCover(res, brand, ref, cache, raw = false) {
+  const manifest = await readManifest(brand, ref);
   if (!manifest.photos?.length) return sendJson(res, 404, { error: 'Sin foto' });
-  const dir = join(photosDir, ref);
+  const dir = photoDir(brand, ref);
   // raw: la primera foto tal cual (miniatura de la ficha del inmueble), sin el diseño de portada
   if (!raw) try { return send(res, 200, await readFile(join(dir, 'cover.jpg')), { 'Content-Type': 'image/jpeg', 'Cache-Control': cache }); } catch {}
   const ph = manifest.photos[0];
@@ -734,19 +744,6 @@ async function sendCover(res, ref, cache, raw = false) {
     }
   }
   return sendJson(res, 404, { error: 'Sin foto' });
-}
-
-function parseCookies(req) {
-  return Object.fromEntries(
-    (req.headers.cookie || '')
-      .split(';')
-      .map(v => v.trim())
-      .filter(Boolean)
-      .map(v => {
-        const i = v.indexOf('=');
-        return [v.slice(0, i), decodeURIComponent(v.slice(i + 1))];
-      })
-  );
 }
 
 function sign(value) {
@@ -831,7 +828,7 @@ const loginPage = (error = '') => `<!doctype html>
 // ===== Revisión por el cliente: enlace público por empresa, sin usuario ni contraseña =====
 const reviewsDir = join(dataDir, 'reviews');
 await mkdir(reviewsDir, { recursive: true });
-const safeBrandId = id => (/^[A-Za-z0-9_-]{1,40}$/.test(id || '') ? id : null);
+const safeBrandId = resourceId;
 const parseJson = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
 async function readReviews(id) { try { return JSON.parse(await readFile(join(reviewsDir, `${id}.json`), 'utf8')); } catch { return {}; } }
 // Marca, contenidos e inmuebles de la empresa a la que pertenece el enlace
@@ -858,7 +855,7 @@ async function handleReview(req, res, url) {
     const prop = data.properties.find(p => String(p.id) === m[3]);
     const ref = prop && safeRef(String(prop.id));
     if (!ref) return sendJson(res, 404, { error: 'Sin foto' });
-    return sendCover(res, ref, 'private, max-age=300');
+    return sendCover(res, data.brand.id, ref, 'no-store');
   }
   const reviews = await readReviews(data.brand.id);
   if (m[4]) {
@@ -1024,7 +1021,7 @@ function contactButtons(c, text) {
 }
 async function propertyPage(req, data, webId, p) {
   const b = data.brand, c = contactOf(b), x = publicProp(p), origin = originOf(req), url = `${origin}/w/${webId}/${x.id}`;
-  const n = (await readManifest(x.id)).photos?.length || 0;
+  const n = (await readManifest(b.id, x.id)).photos?.length || 0;
   const gallery = n ? `<div class="gal">${Array.from({ length: Math.min(n, 40) }, (_, i) => `<img src="/w/${webId}/${x.id}/foto/${i}" alt="Foto ${i + 1} de ${escHtml(x.title)}"${i ? ' loading="lazy"' : ''}>`).join('')}</div><p class="galnote">${n} fotos · desliza para verlas</p>` : '';
   const kicker = [x.operation === 'Alquiler' ? 'En alquiler' : 'En venta', x.location].filter(Boolean).join(' · ');
   const askText = `Hola, me interesa la REF. ${x.ref} (${x.title}). ¿Podemos concertar una visita?`;
@@ -1048,7 +1045,7 @@ async function bioPage(req, data, webId) {
   const b = data.brand, c = contactOf(b), origin = originOf(req);
   const items = [];
   for (const p of data.properties.slice(0, 60)) {
-    const x = publicProp(p), has = ((await readManifest(x.id)).photos?.length || 0) > 0;
+    const x = publicProp(p), has = ((await readManifest(b.id, x.id)).photos?.length || 0) > 0;
     items.push(`<a class="item" href="/w/${webId}/${x.id}">${has ? `<img src="/w/${webId}/${x.id}/foto/0" alt="" loading="lazy">` : '<span class="ph"></span>'}<div>${x.stampLabel ? `<span class="stamp ${x.stamp}">${escHtml(x.stampLabel)}</span>` : ''}<b>${escHtml(x.title)}</b><small>${escHtml([x.location, `REF. ${x.ref}`].filter(Boolean).join(' · '))}</small>${x.price ? `<div class="p">${escHtml(x.price)}</div>` : ''}</div></a>`);
   }
   const links = [contactButtons(c, `Hola, os escribo desde Instagram.`), c.web && `<a class="btn light" data-hit="web" href="https://${escHtml(c.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">${escHtml(c.web)}</a>`].filter(Boolean).join('');
@@ -1071,11 +1068,11 @@ async function handleWeb(req, res, url) {
   if (!p) return send(res, 404, 'Este inmueble ya no está disponible.', { 'Content-Type': 'text/plain; charset=utf-8' });
   if (!m[3]) { countHit(data.brand.id, 'view', String(p.id), req); return html(await propertyPage(req, data, m[1], p)); }
   const ref = String(p.id);
-  if (m[3] === 'portada.jpg') return sendCover(res, ref, 'public, max-age=600');
-  const ph = (await readManifest(ref)).photos?.[Number(m[4])];
+  if (m[3] === 'portada.jpg') return sendCover(res, data.brand.id, ref, 'public, max-age=600');
+  const ph = (await readManifest(data.brand.id, ref)).photos?.[Number(m[4])];
   if (!ph || !safeId(ph.id)) return send(res, 404, 'Sin foto', { 'Content-Type': 'text/plain; charset=utf-8' });
   for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
-    try { return send(res, 200, await readFile(join(photosDir, ref, `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': 'public, max-age=600' }); } catch {}
+    try { return send(res, 200, await readFile(join(photoDir(data.brand.id, ref), `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': 'public, max-age=600' }); } catch {}
   }
   return send(res, 404, 'Sin foto', { 'Content-Type': 'text/plain; charset=utf-8' });
 }
@@ -1305,6 +1302,22 @@ async function gdriveBackup() {
         const d = await readFile(join(photosDir, ref, f)).catch(() => null); if (d) await put(rel, f, refId, d);
       }
       await save(); // se guarda el avance por si se corta a mitad
+    }
+    // New storage has an explicit brand/property namespace. Keep backing up
+    // legacy folders too until their retention/removal is separately approved.
+    const scopedRoot = await gdriveFolder(g, 'fotos-v2', 'fotos-v2', root);
+    for (const brand of await readdir(scopedPhotosDir)) {
+      if (!resourceId(brand)) continue;
+      const brandFolder = await gdriveFolder(g, `fotos-v2/${brand}`, brand, scopedRoot);
+      for (const ref of await readdir(join(scopedPhotosDir, brand))) {
+        if (!resourceId(ref)) continue;
+        const rel = `fotos-v2/${brand}/${ref}`, folder = await gdriveFolder(g, rel, ref, brandFolder);
+        for (const f of (await readdir(join(scopedPhotosDir, brand, ref))).filter(f => !f.endsWith('.tmp'))) {
+          const d = await readFile(join(scopedPhotosDir, brand, ref, f));
+          await put(`${rel}/${f}`, f, folder, d);
+        }
+        await save();
+      }
     }
     Object.assign(g, { lastRun: Date.now(), lastOk: Date.now(), lastError: '', lastSummary: `${up} archivos subidos, ${same} ya estaban` });
   } catch (err) {
@@ -1741,8 +1754,10 @@ async function handleMeta(req, res, url, user) {
   return sendJson(res, 404, { error: 'No encontrado' });
 }
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname === '/vendor/purify.min.js') return send(res, 200, purifyJs, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
 
   if (url.pathname === '/vendor/mp4-muxer.mjs' && mp4MuxerJs) {
     return send(res, 200, mp4MuxerJs, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400' });
@@ -1852,8 +1867,18 @@ Sitemap: ${originOf(req)}/sitemap.xml
   }
 
   return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain; charset=utf-8' });
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch(err => {
+    if (res.destroyed) return;
+    if (res.headersSent) return res.destroy();
+    const status = err instanceof URIError || err instanceof TypeError ? 400 : 500;
+    console.error('Petición rechazada', err.name);
+    sendJson(res, status, { error: status === 400 ? 'Petición no válida' : 'No se pudo completar la operación' });
+  });
 });
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`Momentun Digital Studio escuchando en el puerto ${port}`);
+  console.log(`Momentun Digital Studio escuchando en el puerto ${server.address().port}`);
 });

@@ -46,3 +46,15 @@ la imagen se ha borrado del servidor. Reiniciar no basta: hay que volver a
 construir con **Implementar**. Si EasyPanel se salta la construcción porque el
 commit no ha cambiado, sube un commit nuevo a `main` (aunque esté vacío) e
 implementa de nuevo.
+
+## Desarrollo y regresiones de seguridad
+
+Node >=22. Instala con `npm ci`, prepara Chromium con
+`npx playwright install --with-deps chromium` y ejecuta `npm run check` y `npm test`.
+La suite usa datos y credenciales sintéticos en directorios temporales.
+
+La fase 0 requiere revisar el cambio de almacenamiento de fotografías antes de
+publicar: [cambios, pruebas y riesgos](docs/security/phase-0.md) y
+[procedimiento offline de copia y recuperación](docs/security/photo-recovery.md).
+Las fotos nuevas se guardan por empresa en `DATA_DIR/photos-v2`; las antiguas no
+se borran, migran ni reasignan automáticamente al arrancar.

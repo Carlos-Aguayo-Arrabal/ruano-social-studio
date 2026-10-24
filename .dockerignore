@@ -1,0 +1,8 @@
+.git
+node_modules
+data
+.env
+.env.*
+test-results
+playwright-report
+npm-audit.json
