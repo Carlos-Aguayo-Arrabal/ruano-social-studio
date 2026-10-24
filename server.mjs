@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { resourceId, parseCookies, normalizeContent } from './lib/security.mjs';
+import { resourceId, parseCookies, normalizeContent, trustedMutation } from './lib/security.mjs';
 import crypto from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, unlink, copyFile, readdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -134,9 +134,12 @@ function readRaw(req, limit) {
 
 async function readManifest(brand, ref) {
   try {
-    return JSON.parse(await readFile(join(photoDir(brand, ref), 'index.json'), 'utf8'));
-  } catch {
-    return { photos: [] };
+    const manifest = JSON.parse(await readFile(join(photoDir(brand, ref), 'index.json'), 'utf8'));
+    if (!Array.isArray(manifest.photos) || manifest.photos.some(p => !p || !safeId(p.id))) throw new Error('Invalid photo manifest');
+    return manifest;
+  } catch (err) {
+    if (err.code === 'ENOENT') return { photos: [] };
+    throw Object.assign(new Error('No se pudo leer el índice de fotografías; conserva los archivos y revisa la copia de seguridad.'), { status: 503 });
   }
 }
 
@@ -381,9 +384,9 @@ async function generateAi(userText, schema, brand) {
 // Trabajos en cola, de uno en uno (el VPS no tiene tarjeta gráfica): el navegador consulta el estado
 const aiJobs = new Map();
 let aiQueue = Promise.resolve();
-function startAiJob(run) {
+function startAiJob(user, run) {
   const id = crypto.randomBytes(9).toString('hex');
-  const job = { status: 'queued', created: Date.now() };
+  const job = { userId: user.id, status: 'queued', created: Date.now() };
   aiJobs.set(id, job);
   for (const [k, j] of aiJobs) if (Date.now() - j.created > 3600_000) aiJobs.delete(k);
   aiQueue = aiQueue.then(async () => {
@@ -394,7 +397,7 @@ function startAiJob(run) {
   return id;
 }
 
-async function handleAi(req, res, url) {
+async function handleAi(req, res, url, user) {
   if (url.pathname === '/api/ai/status') {
     const provider = aiProvider();
     return sendJson(res, 200, {
@@ -405,8 +408,8 @@ async function handleAi(req, res, url) {
   const jm = url.pathname.match(/^\/api\/ai\/jobs\/([a-f0-9]{18})$/);
   if (jm) {
     const job = aiJobs.get(jm[1]);
-    if (!job) return sendJson(res, 404, { error: 'Trabajo no encontrado' });
-    const ahead = job.status === 'queued' ? [...aiJobs.values()].filter(j => j.status !== 'done' && j.status !== 'error' && j.created < job.created).length : 0;
+    if (!job || job.userId !== user.id) return sendJson(res, 404, { error: 'Trabajo no encontrado' });
+    const ahead = job.status === 'queued' ? [...aiJobs.values()].filter(j => j.userId === user.id && j.status !== 'done' && j.status !== 'error' && j.created < job.created).length : 0;
     return sendJson(res, 200, { status: job.status, result: job.result, error: job.error, ahead });
   }
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Método no permitido' });
@@ -423,13 +426,13 @@ async function handleAi(req, res, url) {
     const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
     const must = [body.property?.price && !['reservado', 'vendido'].includes(body.campaign) ? `precio ${clip(body.property.price, 40)}` : '', body.property?.reference ? `referencia REF. ${clip(body.property.reference, 40)}` : ''].filter(Boolean).join(' y ');
     const prompt = `Campaña: ${brief}${extra}${must ? `\nDatos que deben aparecer en la publicación: ${must}.` : ''}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
-    return sendJson(res, 202, { job: startAiJob(async () => ({ texts: ensureEssentials(await generateAi(prompt, schema, body.brand), body.property, body.campaign, contact) })) });
+    return sendJson(res, 202, { job: startAiJob(user, async () => ({ texts: ensureEssentials(await generateAi(prompt, schema, body.brand), body.property, body.campaign, contact) })) });
   }
   if (url.pathname === '/api/ai/rewrite') {
     const kind = CAPTION_KEYS.includes(body.kind) ? body.kind : 'publicacion';
     const prompt = `Mejora este texto de tipo "${kind}" manteniendo los datos y el formato indicado para ese tipo.\nTono: ${tone}\nContacto para el cierre: ${contact}\n${clip(body.instructions, 300) ? `Indicaciones: ${clip(body.instructions, 300)}\n` : ''}\nTexto actual:\n${clip(body.text, 4000)}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
     const schema = { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: false };
-    return sendJson(res, 202, { job: startAiJob(async () => ({ text: (await generateAi(prompt, schema, body.brand)).texto })) });
+    return sendJson(res, 202, { job: startAiJob(user, async () => ({ text: (await generateAi(prompt, schema, body.brand)).texto })) });
   }
   return sendJson(res, 404, { error: 'No encontrado' });
 }
@@ -626,7 +629,7 @@ async function handleApi(req, res, url, user) {
     return sendJson(res, id ? 200 : 400, id ? await readReviews(id) : { error: 'Empresa no válida' });
   }
 
-  if (url.pathname.startsWith('/api/ai/')) return handleAi(req, res, url);
+  if (url.pathname.startsWith('/api/ai/')) return handleAi(req, res, url, user);
 
 
   // Every photo API needs an explicit brand and a property belonging to it.
@@ -664,9 +667,9 @@ async function handleApi(req, res, url, user) {
       if (!isWebp && !isJpg) return sendJson(res, 400, { error: 'Solo se admiten fotos WebP o JPG' });
       const id = crypto.randomBytes(12).toString('hex');
       await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, `${id}.${isWebp ? 'webp' : 'jpg'}`), body);
       await withLock(photoLock, async () => {
         const manifest = await readManifest(photoBrand, ref);
+        await writeFile(join(dir, `${id}.${isWebp ? 'webp' : 'jpg'}`), body);
         manifest.photos.push({ id, adjust: null });
         await writeManifest(photoBrand, ref, manifest);
       });
@@ -1108,7 +1111,7 @@ async function handleLead(req, res, url) {
 // Variables: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, NOTIFY_EMAIL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
 // Cada marca puede tener su propio email (notifyEmail) y chat de Telegram (telegramChatId).
 const mailer = process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS
-  ? nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } })
+  ? nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000, disableFileAccess: true, disableUrlAccess: true })
   : null;
 const notifyChannels = brand => ({
   email: mailer && (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(brand.notifyEmail || '') ? brand.notifyEmail : process.env.NOTIFY_EMAIL) || '',
@@ -1756,6 +1759,9 @@ async function handleMeta(req, res, url, user) {
 
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if ((!['GET', 'HEAD', 'OPTIONS'].includes(req.method) || url.pathname === '/logout') && !trustedMutation(req, { production: isProduction, publicUrl: process.env.PUBLIC_URL })) {
+    return sendJson(res, 403, { error: 'Origen de la petición no permitido' });
+  }
 
   if (url.pathname === '/vendor/purify.min.js') return send(res, 200, purifyJs, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
 

@@ -1,0 +1,27 @@
+# Optional isolated local/staging rehearsal; never points at Hostinger or prod.
+name: ruano-security-staging
+services:
+  studio:
+    build:
+      context: ..
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    cpus: 1
+    mem_limit: 256m
+    pids_limit: 128
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATA_DIR: /app/data
+      APP_USERNAME: ${STAGING_APP_USERNAME:?Provide a synthetic staging username}
+      APP_PASSWORD: ${STAGING_APP_PASSWORD:?Provide a synthetic staging password}
+      APP_SESSION_SECRET: ${STAGING_APP_SESSION_SECRET:?Provide a synthetic staging signing key}
+      OLLAMA_URL: http://127.0.0.1:1
+    volumes:
+      - synthetic-data:/app/data
+volumes:
+  synthetic-data: {}

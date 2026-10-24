@@ -15,7 +15,7 @@
     "@anthropic-ai/sdk": "^1.0.0",
     "dompurify": "3.4.17",
     "mp4-muxer": "5.2.2",
-    "nodemailer": "6.9.16"
+    "nodemailer": "10.2.1"
   },
   "devDependencies": {
     "acorn": "8.19.0",

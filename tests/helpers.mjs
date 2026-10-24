@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
 export const photo = await readFile(new URL('./fixtures/photo.jpg', import.meta.url));
-export async function fixture({ store: custom, start = true } = {}) {
+export async function fixture({ store: custom, start = true, runtime = {} } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'ruano-security-'));
   const password = randomBytes(24).toString('hex');
   const store = custom || { version: 2, v: 1,
@@ -21,7 +21,7 @@ export async function fixture({ store: custom, start = true } = {}) {
   const launch = async () => {
     // Deliberately do not inherit provider credentials or production configuration.
     child = spawn(process.execPath, ['server.mjs'], { cwd: root,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: dir, NODE_ENV: 'development', APP_USERNAME: 'testowner', APP_PASSWORD: password, APP_SESSION_SECRET: randomBytes(48).toString('hex'), OLLAMA_URL: 'http://127.0.0.1:1' },
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: dir, NODE_ENV: 'development', APP_USERNAME: 'testowner', APP_PASSWORD: password, APP_SESSION_SECRET: randomBytes(48).toString('hex'), OLLAMA_URL: 'http://127.0.0.1:1', ...runtime },
       stdio: ['ignore', 'pipe', 'pipe'] });
     logs = '';
     child.stdout.on('data', b => { logs += b; }); child.stderr.on('data', b => { logs += b; });

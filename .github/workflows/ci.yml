@@ -2,6 +2,7 @@ name: Security regressions
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -21,13 +22,28 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run check
       - run: npm test
-      # H04 remains tracked until the separately proposed Nodemailer upgrade.
-      # Report it visibly without disguising security-regression test failures.
-      - name: Dependency audit (known Nodemailer finding)
-        continue-on-error: true
+      - name: Dependency audit (all severities block)
         run: npm audit --json > npm-audit.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: dependency-audit-node-${{ matrix.node }}
           path: npm-audit.json
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build production-dependency image (no registry publication)
+        run: docker build -t ruano-staging-check .
+      - name: Isolated startup, health, permissions and restart tests
+        run: node scripts/test-docker.mjs ruano-staging-check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-synthetic-results
+          path: artifacts/docker-results.json

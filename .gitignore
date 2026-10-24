@@ -2,3 +2,5 @@ node_modules/
 data/
 playwright-report/
 test-results/
+artifacts/
+npm-audit.json
