@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { SessionStore } from './lib/sessions.mjs';
+import { resourceId, parseCookies, normalizeContent, trustedMutation } from './lib/security.mjs';
 import crypto from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, unlink, copyFile, readdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +22,7 @@ if (!username || !password || !sessionSecret) {
 
 const indexHtml = await readFile(join(__dirname, 'index.html'));
 // Librería para montar el MP4 del reel en el navegador (se sirve desde aquí, sin depender de un CDN)
+const purifyJs = await readFile(join(__dirname, 'node_modules', 'dompurify', 'dist', 'purify.min.js'));
 const mp4MuxerJs = await readFile(join(__dirname, 'node_modules', 'mp4-muxer', 'build', 'mp4-muxer.mjs')).catch(() => null);
 // Logo oficial de Ruano (va incrustado en index.html); se usa en la revisión si la marca no tiene otro
 const DEFAULT_LOGO = (indexHtml.toString('utf8').match(/id="officialLogo" src="(data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+)"/) || [])[1] || '';
@@ -27,7 +30,14 @@ const DEFAULT_LOGO = (indexHtml.toString('utf8').match(/id="officialLogo" src="(
 // Datos persistentes: en producción /app/data es un volumen de Easypanel
 const dataDir = process.env.DATA_DIR || join(__dirname, 'data');
 const stateFile = join(dataDir, 'state.json');
+// Legacy files are retained untouched. Only the reviewed offline migration reads them.
 const photosDir = join(dataDir, 'photos');
+const scopedPhotosDir = join(dataDir, 'photos-v2');
+const photoDir = (brand, ref) => {
+  if (!resourceId(brand) || !resourceId(ref)) throw Object.assign(new Error('Recurso no válido'), { status: 400 });
+  return join(scopedPhotosDir, brand, String(ref));
+};
+await mkdir(scopedPhotosDir, { recursive: true });
 await mkdir(photosDir, { recursive: true });
 
 // Copia de seguridad del estado en cada arranque; se guardan las 10 últimas
@@ -71,12 +81,6 @@ async function readStore() {
 }
 async function writeStore(st) { st.v = (st.v || 0) + 1; st.savedAt = new Date().toISOString(); storeCache = st; await writeAtomic(storeFile, JSON.stringify(st)); }
 const brandDataOf = (st, id) => st.data[id] || { content: [], properties: [] };
-async function propertyBrand(propId) {
-  const st = await readStore();
-  for (const [id, d] of Object.entries(st.data)) if ((d.properties || []).some(p => String(p.id) === String(propId))) return id;
-  return null;
-}
-
 // ─── Usuarios: el administrador (APP_USERNAME/APP_PASSWORD) y los usuarios de cada agencia (users.json) ───
 const usersFile = join(dataDir, 'users.json');
 let usersCache = [];
@@ -85,7 +89,21 @@ const hashPassword = (pw, salt) => new Promise((ok, ko) => crypto.scrypt(String(
 const OWNER = { id: 'owner', username, name: 'Administrador', role: 'admin', brands: [] };
 const canBrand = (user, id) => !!user && (user.role === 'admin' || (user.brands || []).includes(id));
 const publicUser = u => ({ id: u.id, username: u.username, name: u.name || u.username, role: u.role, brands: u.brands || [], disabled: !!u.disabled, owner: u.id === 'owner' });
-async function saveUsers(list) { usersCache = list; await writeAtomic(usersFile, JSON.stringify(list, null, 1)); }
+function sessionBinding(u) {
+  return crypto.createHmac('sha256',sessionSecret).update(JSON.stringify(u.id==='owner'
+    ? {uid:u.id,username,password,role:'admin'}
+    : {uid:u.id,username:u.username,pv:u.pv||0,hash:u.hash,role:u.role,brands:[...(u.brands||[])].sort(),disabled:!!u.disabled})).digest('hex');
+}
+const sessionUser = id => id==='owner'?OWNER:usersCache.find(u=>u.id===id&&!u.disabled);
+const bindingFor = id => {const u=sessionUser(id);return u?sessionBinding(u):null;};
+const sessions = await SessionStore.open(join(dataDir,'sessions.json'));
+await sessions.prune(bindingFor);
+setInterval(()=>sessions.prune(bindingFor).catch(()=>console.error('Limpieza de sesiones no disponible')),60_000).unref();
+async function saveUsers(list) {
+  const invalid=usersCache.filter(old=>!list.some(u=>u.id===old.id&&sessionBinding(u)===sessionBinding(old))).map(u=>u.id);
+  await writeAtomic(usersFile,JSON.stringify(list,null,1));usersCache=list;
+  if(invalid.length)await sessions.revokeUsers(invalid);
+}
 async function authenticate(u, pw) {
   if (safeEqual(u, username) && safeEqual(pw, password)) return OWNER;
   const user = usersCache.find(x => x.username.toLowerCase() === String(u).toLowerCase() && !x.disabled);
@@ -94,7 +112,7 @@ async function authenticate(u, pw) {
 }
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 
-const safeRef = r => (/^[A-Za-z0-9_-]{1,40}$/.test(r || '') ? r : null);
+const safeRef = resourceId;
 const safeId = i => (/^[a-f0-9]{24}$/.test(i || '') ? i : null);
 
 // Serializa las escrituras por clave para que no se pisen
@@ -129,11 +147,14 @@ function readRaw(req, limit) {
   });
 }
 
-async function readManifest(ref) {
+async function readManifest(brand, ref) {
   try {
-    return JSON.parse(await readFile(join(photosDir, ref, 'index.json'), 'utf8'));
-  } catch {
-    return { photos: [] };
+    const manifest = JSON.parse(await readFile(join(photoDir(brand, ref), 'index.json'), 'utf8'));
+    if (!Array.isArray(manifest.photos) || manifest.photos.some(p => !p || !safeId(p.id))) throw new Error('Invalid photo manifest');
+    return manifest;
+  } catch (err) {
+    if (err.code === 'ENOENT') return { photos: [] };
+    throw Object.assign(new Error('No se pudo leer el índice de fotografías; conserva los archivos y revisa la copia de seguridad.'), { status: 503 });
   }
 }
 
@@ -378,9 +399,9 @@ async function generateAi(userText, schema, brand) {
 // Trabajos en cola, de uno en uno (el VPS no tiene tarjeta gráfica): el navegador consulta el estado
 const aiJobs = new Map();
 let aiQueue = Promise.resolve();
-function startAiJob(run) {
+function startAiJob(user, run) {
   const id = crypto.randomBytes(9).toString('hex');
-  const job = { status: 'queued', created: Date.now() };
+  const job = { userId: user.id, authBinding:sessionBinding(user), status: 'queued', created: Date.now() };
   aiJobs.set(id, job);
   for (const [k, j] of aiJobs) if (Date.now() - j.created > 3600_000) aiJobs.delete(k);
   aiQueue = aiQueue.then(async () => {
@@ -391,7 +412,7 @@ function startAiJob(run) {
   return id;
 }
 
-async function handleAi(req, res, url) {
+async function handleAi(req, res, url, user) {
   if (url.pathname === '/api/ai/status') {
     const provider = aiProvider();
     return sendJson(res, 200, {
@@ -402,8 +423,8 @@ async function handleAi(req, res, url) {
   const jm = url.pathname.match(/^\/api\/ai\/jobs\/([a-f0-9]{18})$/);
   if (jm) {
     const job = aiJobs.get(jm[1]);
-    if (!job) return sendJson(res, 404, { error: 'Trabajo no encontrado' });
-    const ahead = job.status === 'queued' ? [...aiJobs.values()].filter(j => j.status !== 'done' && j.status !== 'error' && j.created < job.created).length : 0;
+    if (!job || job.userId !== user.id || job.authBinding!==sessionBinding(user)) return sendJson(res, 404, { error: 'Trabajo no encontrado' });
+    const ahead = job.status === 'queued' ? [...aiJobs.values()].filter(j => j.userId === user.id && j.status !== 'done' && j.status !== 'error' && j.created < job.created).length : 0;
     return sendJson(res, 200, { status: job.status, result: job.result, error: job.error, ahead });
   }
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Método no permitido' });
@@ -420,20 +441,20 @@ async function handleAi(req, res, url) {
     const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
     const must = [body.property?.price && !['reservado', 'vendido'].includes(body.campaign) ? `precio ${clip(body.property.price, 40)}` : '', body.property?.reference ? `referencia REF. ${clip(body.property.reference, 40)}` : ''].filter(Boolean).join(' y ');
     const prompt = `Campaña: ${brief}${extra}${must ? `\nDatos que deben aparecer en la publicación: ${must}.` : ''}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
-    return sendJson(res, 202, { job: startAiJob(async () => ({ texts: ensureEssentials(await generateAi(prompt, schema, body.brand), body.property, body.campaign, contact) })) });
+    return sendJson(res, 202, { job: startAiJob(user, async () => ({ texts: ensureEssentials(await generateAi(prompt, schema, body.brand), body.property, body.campaign, contact) })) });
   }
   if (url.pathname === '/api/ai/rewrite') {
     const kind = CAPTION_KEYS.includes(body.kind) ? body.kind : 'publicacion';
     const prompt = `Mejora este texto de tipo "${kind}" manteniendo los datos y el formato indicado para ese tipo.\nTono: ${tone}\nContacto para el cierre: ${contact}\n${clip(body.instructions, 300) ? `Indicaciones: ${clip(body.instructions, 300)}\n` : ''}\nTexto actual:\n${clip(body.text, 4000)}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
     const schema = { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: false };
-    return sendJson(res, 202, { job: startAiJob(async () => ({ text: (await generateAi(prompt, schema, body.brand)).texto })) });
+    return sendJson(res, 202, { job: startAiJob(user, async () => ({ text: (await generateAi(prompt, schema, body.brand)).texto })) });
   }
   return sendJson(res, 404, { error: 'No encontrado' });
 }
 
-const writeManifest = (ref, manifest) =>
-  writeAtomic(join(photosDir, ref, 'index.json'), JSON.stringify(manifest));
-const sessionDurationMs = 12 * 60 * 60 * 1000;
+const writeManifest = (brand, ref, manifest) =>
+  writeAtomic(join(photoDir(brand, ref), 'index.json'), JSON.stringify(manifest));
+
 
 function securityHeaders(extra = {}) {
   return {
@@ -471,7 +492,7 @@ async function handleApi(req, res, url, user) {
     const body = JSON.parse((await readRaw(req, MAX_STATE_BYTES)).toString('utf8') || '{}');
     const result = await withLock('store', async () => {
       const st = await readStore(), denied = [];
-      const okId = id => /^[A-Za-z0-9_-]{1,40}$/.test(String(id ?? ''));
+      const okId = resourceId;
       for (const b of body.brands?.upsert || []) {
         if (!b || !safeBrandId(b.id)) continue;
         const i = st.brands.findIndex(x => x.id === b.id);
@@ -484,14 +505,15 @@ async function handleApi(req, res, url, user) {
         st.brands = st.brands.filter(x => x.id !== id); delete st.data[id];
       }
       for (const [bid, ch] of Object.entries(body.data || {})) {
-        if (!st.brands.some(b => b.id === bid) || !canBrand(user, bid)) { denied.push(bid); continue; }
+        if (!resourceId(bid) || !st.brands.some(b => b.id === bid) || !canBrand(user, bid)) { denied.push(bid); continue; }
         const d = (st.data[bid] ||= { content: [], properties: [] });
         for (const key of ['content', 'properties']) {
           const c = ch?.[key]; if (!c) continue;
           const list = (d[key] ||= []);
           const gone = new Set((c.remove || []).map(String));
           if (gone.size) d[key] = list.filter(x => !gone.has(String(x.id)));
-          for (const item of c.upsert || []) {
+          for (const rawItem of c.upsert || []) {
+            const item = key === 'content' ? normalizeContent(rawItem) : rawItem;
             if (!item || !okId(item.id)) continue;
             const i = d[key].findIndex(x => String(x.id) === String(item.id));
             if (i >= 0 && key === 'content') for (const f of META_FIELDS) if (d[key][i][f] != null && (item[f] == null || (f === 'metaStatus' && ['published', 'publishing'].includes(d[key][i][f]) && item[f] !== d[key][i][f]))) item[f] = d[key][i][f];
@@ -508,12 +530,18 @@ async function handleApi(req, res, url, user) {
 
   // Usuarios (solo administradores)
   if (url.pathname === '/api/users' || url.pathname.startsWith('/api/users/')) {
-    if (user.role !== 'admin') return sendJson(res, 403, { error: 'Solo un administrador puede gestionar usuarios' });
+    return withLock('users',async()=>{
+    const user=currentUser(req);
+    if (user?.role !== 'admin') return sendJson(res, 403, { error: 'Solo un administrador puede gestionar usuarios' });
     const um = url.pathname.match(/^\/api\/users(?:\/([a-f0-9]{12}))?$/);
     if (!um) return sendJson(res, 404, { error: 'No encontrado' });
     if (!um[1] && req.method === 'GET') return sendJson(res, 200, [publicUser(OWNER), ...usersCache.map(publicUser)]);
     const body = req.method === 'DELETE' ? {} : JSON.parse((await readRaw(req, 8192)).toString('utf8') || '{}');
-    const st = await readStore(), validBrands = (body.brands || []).filter(id => st.brands.some(b => b.id === id));
+    if(body.role!=null&&!['admin','agency'].includes(body.role))return sendJson(res,400,{error:'Rol no válido'});
+    if(body.brands!=null&&!Array.isArray(body.brands))return sendJson(res,400,{error:'Empresas no válidas'});
+    const target=um[1]&&usersCache.find(u=>u.id===um[1]);
+    if(user.id!=='owner'&&(target?.role==='admin'||body.role==='admin'))return sendJson(res,403,{error:'Solo el propietario puede gestionar administradores globales'});
+    const st = await readStore(), validBrands = [...new Set((body.brands || []).filter(id => st.brands.some(b => b.id === id)))];
     const role = body.role === 'admin' ? 'admin' : 'agency';
     if (!um[1] && req.method === 'POST') {
       const uname = String(body.username || '').trim().toLowerCase();
@@ -535,15 +563,18 @@ async function handleApi(req, res, url, user) {
       if (body.name != null) u.name = clip(body.name, 60) || u.username;
       if (body.role) { u.role = role; }
       if (body.brands) u.brands = u.role === 'admin' ? [] : validBrands;
-      if (body.disabled != null) { u.disabled = !!body.disabled; u.pv = (u.pv || 0) + 1; }
+      if (body.disabled != null) u.disabled = !!body.disabled;
       if (body.password != null) {
         if (String(body.password).length < 8) return sendJson(res, 400, { error: 'La contraseña debe tener al menos 8 caracteres' });
-        u.salt = crypto.randomBytes(16).toString('hex'); u.hash = await hashPassword(body.password, u.salt); u.pv = (u.pv || 0) + 1;
+        u.salt = crypto.randomBytes(16).toString('hex'); u.hash = await hashPassword(body.password, u.salt);
       }
+      if(u.role==='admin')u.brands=[];
+      if(sessionBinding(u)!==sessionBinding(list[i]))u.pv=(u.pv||0)+1;
       list[i] = u; await saveUsers(list);
       return sendJson(res, 200, publicUser(u));
     }
     return sendJson(res, 405, { error: 'Método no permitido' });
+    });
   }
   // Contactos recibidos desde la web: listar, marcar como atendido o borrar
   if (url.pathname === '/api/stats' && req.method === 'GET') {
@@ -622,31 +653,36 @@ async function handleApi(req, res, url, user) {
     return sendJson(res, id ? 200 : 400, id ? await readReviews(id) : { error: 'Empresa no válida' });
   }
 
-  if (url.pathname.startsWith('/api/ai/')) return handleAi(req, res, url);
+  if (url.pathname.startsWith('/api/ai/')) return handleAi(req, res, url, user);
 
 
-  // /api/photo-counts?ids=a,b,c → { a: 17, b: 0 }
+  // Every photo API needs an explicit brand and a property belonging to it.
+  const photoBrand = safeBrandId(url.searchParams.get('brand'));
+  const st = await readStore();
+  const ownsBrand = photoBrand && st.brands.some(b => b.id === photoBrand) && canBrand(user, photoBrand);
   if (url.pathname === '/api/photo-counts') {
+    if (!ownsBrand) return deny();
+    const properties = brandDataOf(st, photoBrand).properties || [];
     const out = {};
     for (const raw of String(url.searchParams.get('ids') || '').split(',').slice(0, 300)) {
       const ref = safeRef(raw);
-      if (!ref) continue;
-      if (user.role !== 'admin') { const owner = await propertyBrand(ref); if (owner && !canBrand(user, owner)) continue; }
-      out[ref] = (await readManifest(ref)).photos?.length || 0;
+      if (!ref || !properties.some(p => String(p.id) === ref)) continue;
+      out[ref] = (await readManifest(photoBrand, ref)).photos?.length || 0;
     }
     return sendJson(res, 200, out);
   }
 
-  // /api/photos/:ref  y  /api/photos/:ref/:id(.webp|.jpg)
   const m = url.pathname.match(/^\/api\/photos\/([^/]+)(?:\/([^/.]+)(\.(?:jpg|webp))?)?$/);
   if (!m) return sendJson(res, 404, { error: 'No encontrado' });
   const ref = safeRef(decodeURIComponent(m[1]));
   if (!ref) return sendJson(res, 400, { error: 'Referencia no válida' });
-  const dir = join(photosDir, ref);
-  if (user.role !== 'admin') { const owner = await propertyBrand(ref); if (owner && !canBrand(user, owner)) return deny(); }
+  if (!ownsBrand) return deny();
+  if (!(brandDataOf(st, photoBrand).properties || []).some(p => String(p.id) === ref)) return sendJson(res, 404, { error: 'Inmueble no encontrado' });
+  const dir = photoDir(photoBrand, ref);
+  const photoLock = `photos:${photoBrand}:${ref}`;
 
   if (!m[2]) {
-    if (req.method === 'GET') return sendJson(res, 200, await readManifest(ref));
+    if (req.method === 'GET') return sendJson(res, 200, await readManifest(photoBrand, ref));
     if (req.method === 'POST') {
       const body = await readRaw(req, MAX_PHOTO_BYTES);
       // Se guardan en WebP (ocupa menos); JPG como alternativa para navegadores sin WebP
@@ -655,24 +691,24 @@ async function handleApi(req, res, url, user) {
       if (!isWebp && !isJpg) return sendJson(res, 400, { error: 'Solo se admiten fotos WebP o JPG' });
       const id = crypto.randomBytes(12).toString('hex');
       await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, `${id}.${isWebp ? 'webp' : 'jpg'}`), body);
-      await withLock(ref, async () => {
-        const manifest = await readManifest(ref);
+      await withLock(photoLock, async () => {
+        const manifest = await readManifest(photoBrand, ref);
+        await writeFile(join(dir, `${id}.${isWebp ? 'webp' : 'jpg'}`), body);
         manifest.photos.push({ id, adjust: null });
-        await writeManifest(ref, manifest);
+        await writeManifest(photoBrand, ref, manifest);
       });
       return sendJson(res, 201, { id, bytes: body.length });
     }
     if (req.method === 'PUT') {
       // Orden y ajustes; solo se aceptan fotos que ya existen
       const data = JSON.parse((await readRaw(req, 256 * 1024)).toString('utf8'));
-      const result = await withLock(ref, async () => {
-        const known = new Set((await readManifest(ref)).photos.map(p => p.id));
+      const result = await withLock(photoLock, async () => {
+        const known = new Set((await readManifest(photoBrand, ref)).photos.map(p => p.id));
         const photos = (Array.isArray(data.photos) ? data.photos : [])
           .filter(p => p && known.has(p.id))
           .map(p => ({ id: p.id, adjust: p.adjust && typeof p.adjust === 'object' ? p.adjust : null }));
         await mkdir(dir, { recursive: true });
-        await writeManifest(ref, { photos });
+        await writeManifest(photoBrand, ref, { photos });
         return photos.length;
       });
       return sendJson(res, 200, { ok: true, photos: result });
@@ -682,7 +718,7 @@ async function handleApi(req, res, url, user) {
 
   // Portada ya diseñada (logo, pie, título y precio) que la app sube al ver la foto 1
   if (m[2] === 'cover') {
-    if (req.method === 'GET') return sendCover(res, ref, 'private, max-age=60', url.searchParams.has('raw'));
+    if (req.method === 'GET') return sendCover(res, photoBrand, ref, 'no-store', url.searchParams.has('raw'));
     if (req.method === 'PUT') {
       const body = await readRaw(req, MAX_PHOTO_BYTES);
       const isJpg = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
@@ -696,22 +732,23 @@ async function handleApi(req, res, url, user) {
 
   const id = safeId(m[2]);
   if (!id) return sendJson(res, 400, { error: 'Foto no válida' });
+  if (!(await readManifest(photoBrand, ref)).photos.some(p => p.id === id)) return sendJson(res, 404, { error: 'Foto no encontrada' });
   if (req.method === 'GET') {
     for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
       try {
         return send(res, 200, await readFile(join(dir, `${id}.${ext}`)), {
           'Content-Type': type,
-          'Cache-Control': 'private, max-age=31536000, immutable',
+          'Cache-Control': 'no-store',
         });
       } catch {}
     }
     return sendJson(res, 404, { error: 'Foto no encontrada' });
   }
   if (req.method === 'DELETE') {
-    await withLock(ref, async () => {
-      const manifest = await readManifest(ref);
+    await withLock(photoLock, async () => {
+      const manifest = await readManifest(photoBrand, ref);
       manifest.photos = manifest.photos.filter(p => p.id !== id);
-      await writeManifest(ref, manifest);
+      await writeManifest(photoBrand, ref, manifest);
       await unlink(join(dir, `${id}.webp`)).catch(() => {});
       await unlink(join(dir, `${id}.jpg`)).catch(() => {});
     });
@@ -721,10 +758,10 @@ async function handleApi(req, res, url, user) {
 }
 
 // Portada diseñada si existe; si no, la primera foto del inmueble
-async function sendCover(res, ref, cache, raw = false) {
-  const manifest = await readManifest(ref);
+async function sendCover(res, brand, ref, cache, raw = false) {
+  const manifest = await readManifest(brand, ref);
   if (!manifest.photos?.length) return sendJson(res, 404, { error: 'Sin foto' });
-  const dir = join(photosDir, ref);
+  const dir = photoDir(brand, ref);
   // raw: la primera foto tal cual (miniatura de la ficha del inmueble), sin el diseño de portada
   if (!raw) try { return send(res, 200, await readFile(join(dir, 'cover.jpg')), { 'Content-Type': 'image/jpeg', 'Cache-Control': cache }); } catch {}
   const ph = manifest.photos[0];
@@ -736,27 +773,11 @@ async function sendCover(res, ref, cache, raw = false) {
   return sendJson(res, 404, { error: 'Sin foto' });
 }
 
-function parseCookies(req) {
-  return Object.fromEntries(
-    (req.headers.cookie || '')
-      .split(';')
-      .map(v => v.trim())
-      .filter(Boolean)
-      .map(v => {
-        const i = v.indexOf('=');
-        return [v.slice(0, i), decodeURIComponent(v.slice(i + 1))];
-      })
-  );
-}
-
 function sign(value) {
   return crypto.createHmac('sha256', sessionSecret).update(value).digest('base64url');
 }
 
-function createSession(user = OWNER) {
-  const payload = Buffer.from(JSON.stringify({ uid: user.id, user: user.username, pv: user.pv || 0, exp: Date.now() + sessionDurationMs })).toString('base64url');
-  return `${payload}.${sign(payload)}`;
-}
+async function createSession(user = OWNER) { return sessions.create(user.id,sessionBinding(user)); }
 
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a));
@@ -765,19 +786,8 @@ function safeEqual(a, b) {
 }
 
 function currentUser(req) {
-  const token = parseCookies(req).ruano_session;
-  if (!token) return null;
-  const [payload, signature] = token.split('.');
-  if (!payload || !signature || !safeEqual(signature, sign(payload))) return null;
-  try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    if (!(Number(data.exp) > Date.now())) return null;
-    if ((data.uid === 'owner' || !data.uid) && data.user === username) return OWNER;
-    const u = usersCache.find(x => x.id === data.uid && !x.disabled);
-    return u && (u.pv || 0) === (data.pv || 0) ? u : null; // al cambiar la contraseña se cierran sus sesiones
-  } catch {
-    return null;
-  }
+  const id=sessions.resolve(parseCookies(req).ruano_session,bindingFor);
+  return id?sessionUser(id):null;
 }
 const validSession = req => !!currentUser(req);
 
@@ -831,7 +841,7 @@ const loginPage = (error = '') => `<!doctype html>
 // ===== Revisión por el cliente: enlace público por empresa, sin usuario ni contraseña =====
 const reviewsDir = join(dataDir, 'reviews');
 await mkdir(reviewsDir, { recursive: true });
-const safeBrandId = id => (/^[A-Za-z0-9_-]{1,40}$/.test(id || '') ? id : null);
+const safeBrandId = resourceId;
 const parseJson = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
 async function readReviews(id) { try { return JSON.parse(await readFile(join(reviewsDir, `${id}.json`), 'utf8')); } catch { return {}; } }
 // Marca, contenidos e inmuebles de la empresa a la que pertenece el enlace
@@ -858,7 +868,7 @@ async function handleReview(req, res, url) {
     const prop = data.properties.find(p => String(p.id) === m[3]);
     const ref = prop && safeRef(String(prop.id));
     if (!ref) return sendJson(res, 404, { error: 'Sin foto' });
-    return sendCover(res, ref, 'private, max-age=300');
+    return sendCover(res, data.brand.id, ref, 'no-store');
   }
   const reviews = await readReviews(data.brand.id);
   if (m[4]) {
@@ -1024,7 +1034,7 @@ function contactButtons(c, text) {
 }
 async function propertyPage(req, data, webId, p) {
   const b = data.brand, c = contactOf(b), x = publicProp(p), origin = originOf(req), url = `${origin}/w/${webId}/${x.id}`;
-  const n = (await readManifest(x.id)).photos?.length || 0;
+  const n = (await readManifest(b.id, x.id)).photos?.length || 0;
   const gallery = n ? `<div class="gal">${Array.from({ length: Math.min(n, 40) }, (_, i) => `<img src="/w/${webId}/${x.id}/foto/${i}" alt="Foto ${i + 1} de ${escHtml(x.title)}"${i ? ' loading="lazy"' : ''}>`).join('')}</div><p class="galnote">${n} fotos · desliza para verlas</p>` : '';
   const kicker = [x.operation === 'Alquiler' ? 'En alquiler' : 'En venta', x.location].filter(Boolean).join(' · ');
   const askText = `Hola, me interesa la REF. ${x.ref} (${x.title}). ¿Podemos concertar una visita?`;
@@ -1048,7 +1058,7 @@ async function bioPage(req, data, webId) {
   const b = data.brand, c = contactOf(b), origin = originOf(req);
   const items = [];
   for (const p of data.properties.slice(0, 60)) {
-    const x = publicProp(p), has = ((await readManifest(x.id)).photos?.length || 0) > 0;
+    const x = publicProp(p), has = ((await readManifest(b.id, x.id)).photos?.length || 0) > 0;
     items.push(`<a class="item" href="/w/${webId}/${x.id}">${has ? `<img src="/w/${webId}/${x.id}/foto/0" alt="" loading="lazy">` : '<span class="ph"></span>'}<div>${x.stampLabel ? `<span class="stamp ${x.stamp}">${escHtml(x.stampLabel)}</span>` : ''}<b>${escHtml(x.title)}</b><small>${escHtml([x.location, `REF. ${x.ref}`].filter(Boolean).join(' · '))}</small>${x.price ? `<div class="p">${escHtml(x.price)}</div>` : ''}</div></a>`);
   }
   const links = [contactButtons(c, `Hola, os escribo desde Instagram.`), c.web && `<a class="btn light" data-hit="web" href="https://${escHtml(c.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">${escHtml(c.web)}</a>`].filter(Boolean).join('');
@@ -1071,11 +1081,11 @@ async function handleWeb(req, res, url) {
   if (!p) return send(res, 404, 'Este inmueble ya no está disponible.', { 'Content-Type': 'text/plain; charset=utf-8' });
   if (!m[3]) { countHit(data.brand.id, 'view', String(p.id), req); return html(await propertyPage(req, data, m[1], p)); }
   const ref = String(p.id);
-  if (m[3] === 'portada.jpg') return sendCover(res, ref, 'public, max-age=600');
-  const ph = (await readManifest(ref)).photos?.[Number(m[4])];
+  if (m[3] === 'portada.jpg') return sendCover(res, data.brand.id, ref, 'public, max-age=600');
+  const ph = (await readManifest(data.brand.id, ref)).photos?.[Number(m[4])];
   if (!ph || !safeId(ph.id)) return send(res, 404, 'Sin foto', { 'Content-Type': 'text/plain; charset=utf-8' });
   for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
-    try { return send(res, 200, await readFile(join(photosDir, ref, `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': 'public, max-age=600' }); } catch {}
+    try { return send(res, 200, await readFile(join(photoDir(data.brand.id, ref), `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': 'public, max-age=600' }); } catch {}
   }
   return send(res, 404, 'Sin foto', { 'Content-Type': 'text/plain; charset=utf-8' });
 }
@@ -1111,7 +1121,7 @@ async function handleLead(req, res, url) {
 // Variables: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, NOTIFY_EMAIL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
 // Cada marca puede tener su propio email (notifyEmail) y chat de Telegram (telegramChatId).
 const mailer = process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS
-  ? nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } })
+  ? nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000, disableFileAccess: true, disableUrlAccess: true })
   : null;
 const notifyChannels = brand => ({
   email: mailer && (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(brand.notifyEmail || '') ? brand.notifyEmail : process.env.NOTIFY_EMAIL) || '',
@@ -1305,6 +1315,22 @@ async function gdriveBackup() {
         const d = await readFile(join(photosDir, ref, f)).catch(() => null); if (d) await put(rel, f, refId, d);
       }
       await save(); // se guarda el avance por si se corta a mitad
+    }
+    // New storage has an explicit brand/property namespace. Keep backing up
+    // legacy folders too until their retention/removal is separately approved.
+    const scopedRoot = await gdriveFolder(g, 'fotos-v2', 'fotos-v2', root);
+    for (const brand of await readdir(scopedPhotosDir)) {
+      if (!resourceId(brand)) continue;
+      const brandFolder = await gdriveFolder(g, `fotos-v2/${brand}`, brand, scopedRoot);
+      for (const ref of await readdir(join(scopedPhotosDir, brand))) {
+        if (!resourceId(ref)) continue;
+        const rel = `fotos-v2/${brand}/${ref}`, folder = await gdriveFolder(g, rel, ref, brandFolder);
+        for (const f of (await readdir(join(scopedPhotosDir, brand, ref))).filter(f => !f.endsWith('.tmp'))) {
+          const d = await readFile(join(scopedPhotosDir, brand, ref, f));
+          await put(`${rel}/${f}`, f, folder, d);
+        }
+        await save();
+      }
     }
     Object.assign(g, { lastRun: Date.now(), lastOk: Date.now(), lastError: '', lastSummary: `${up} archivos subidos, ${same} ya estaban` });
   } catch (err) {
@@ -1741,14 +1767,20 @@ async function handleMeta(req, res, url, user) {
   return sendJson(res, 404, { error: 'No encontrado' });
 }
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if ((!['GET', 'HEAD', 'OPTIONS'].includes(req.method) || url.pathname === '/logout') && !trustedMutation(req, { production: isProduction, publicUrl: process.env.PUBLIC_URL })) {
+    return sendJson(res, 403, { error: 'Origen de la petición no permitido' });
+  }
+
+  if (url.pathname === '/vendor/purify.min.js') return send(res, 200, purifyJs, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
 
   if (url.pathname === '/vendor/mp4-muxer.mjs' && mp4MuxerJs) {
     return send(res, 200, mp4MuxerJs, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400' });
   }
 
   if (url.pathname === '/health') {
+    if(!sessions.healthy)return send(res,503,'unavailable',{'Content-Type':'text/plain; charset=utf-8'});
     return send(res, 200, 'ok', { 'Content-Type': 'text/plain; charset=utf-8' });
   }
 
@@ -1782,18 +1814,19 @@ const server = http.createServer(async (req, res) => {
       const secure = isProduction ? '; Secure' : '';
       res.writeHead(303, {
         Location: '/',
-        'Set-Cookie': `ruano_session=${encodeURIComponent(createSession(user))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${secure}`,
+        'Set-Cookie': `ruano_session=${encodeURIComponent(await createSession(user))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${secure}`,
       });
       return res.end();
-    } catch {
-      return send(res, 400, 'Petición no válida');
+    } catch(err) {
+      return send(res, [429,503].includes(err.status)?err.status:400, [429,503].includes(err.status)?err.message:'Petición no válida');
     }
   }
 
   if (url.pathname === '/logout') {
+    await sessions.revoke(parseCookies(req).ruano_session);
     res.writeHead(303, {
       Location: '/login',
-      'Set-Cookie': 'ruano_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0',
+      'Set-Cookie': `ruano_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction?'; Secure':''}`,
     });
     return res.end();
   }
@@ -1852,8 +1885,18 @@ Sitemap: ${originOf(req)}/sitemap.xml
   }
 
   return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain; charset=utf-8' });
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch(err => {
+    if (res.destroyed) return;
+    if (res.headersSent) return res.destroy();
+    const status = err.status===503?503:err instanceof URIError || err instanceof TypeError ? 400 : 500;
+    console.error('Petición rechazada', err.name);
+    sendJson(res, status, { error: status === 400 ? 'Petición no válida' : 'No se pudo completar la operación' });
+  });
 });
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`Momentun Digital Studio escuchando en el puerto ${port}`);
+  console.log(`Momentun Digital Studio escuchando en el puerto ${server.address().port}`);
 });

@@ -46,3 +46,36 @@ la imagen se ha borrado del servidor. Reiniciar no basta: hay que volver a
 construir con **Implementar**. Si EasyPanel se salta la construcción porque el
 commit no ha cambiado, sube un commit nuevo a `main` (aunque esté vacío) e
 implementa de nuevo.
+
+## Desarrollo y regresiones de seguridad
+
+Node >=22. Instala con `npm ci`, prepara Chromium con
+`npx playwright install --with-deps chromium` y ejecuta `npm run check` y `npm test`.
+La suite usa datos y credenciales sintéticos en directorios temporales.
+
+La fase 0 requiere revisar el cambio de almacenamiento de fotografías antes de
+publicar: [cambios, pruebas y riesgos](docs/security/phase-0.md) y
+[procedimiento offline de copia y recuperación](docs/security/photo-recovery.md).
+Las fotos nuevas se guardan por empresa en `DATA_DIR/photos-v2`; las antiguas no
+se borran, migran ni reasignan automáticamente al arrancar.
+
+
+### Fase 0.1 y staging controlado
+
+Nodemailer actualizado a 10.2.1; auditoría de dependencias bloqueante en CI.
+[Informe de fase 0.1](docs/security/phase-01.md),
+[checklist de staging](docs/security/staging-checklist.md) y
+[estado GitHub](docs/security/github-review-status.md).
+El smoke Docker usa únicamente contenedor/volumen sintéticos sin red:
+`node scripts/test-docker.mjs ruano-staging-check` tras construir esa imagen.
+No es un despliegue en Hostinger ni una autorización para operar fotografías reales.
+
+
+### Sesiones y autorización · fase 0.2
+
+[Impacto y transición documentados](docs/security/session-transition.md): esta
+versión rechaza cookies antiguas y exige nuevo login. Sesiones revocables en
+`DATA_DIR/sessions.json`, una sola réplica y volumen persistente.
+[Informe, pruebas y límites](docs/security/phase-02.md) y
+[matriz administrativa/propuesta pendiente](docs/security/authorization-proposal.md).
+No restaurar sesiones antiguas para recuperar accesos después de un backup.
