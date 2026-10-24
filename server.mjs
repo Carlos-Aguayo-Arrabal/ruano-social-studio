@@ -401,7 +401,7 @@ const aiJobs = new Map();
 let aiQueue = Promise.resolve();
 function startAiJob(user, run) {
   const id = crypto.randomBytes(9).toString('hex');
-  const job = { userId: user.id, status: 'queued', created: Date.now() };
+  const job = { userId: user.id, authBinding:sessionBinding(user), status: 'queued', created: Date.now() };
   aiJobs.set(id, job);
   for (const [k, j] of aiJobs) if (Date.now() - j.created > 3600_000) aiJobs.delete(k);
   aiQueue = aiQueue.then(async () => {
@@ -423,7 +423,7 @@ async function handleAi(req, res, url, user) {
   const jm = url.pathname.match(/^\/api\/ai\/jobs\/([a-f0-9]{18})$/);
   if (jm) {
     const job = aiJobs.get(jm[1]);
-    if (!job || job.userId !== user.id) return sendJson(res, 404, { error: 'Trabajo no encontrado' });
+    if (!job || job.userId !== user.id || job.authBinding!==sessionBinding(user)) return sendJson(res, 404, { error: 'Trabajo no encontrado' });
     const ahead = job.status === 'queued' ? [...aiJobs.values()].filter(j => j.userId === user.id && j.status !== 'done' && j.status !== 'error' && j.created < job.created).length : 0;
     return sendJson(res, 200, { status: job.status, result: job.result, error: job.error, ahead });
   }

@@ -49,3 +49,20 @@ Ver [procedimiento offline detallado](photo-recovery.md). No reutilizar un rollb
 - [ ] Ensayo de Hostinger/EasyPanel, TLS y recuperación externa completado con datos sintéticos.
 - [ ] Permisos/credenciales sandbox y pruebas de integraciones si esas funciones se habilitan.
 - [ ] Nueva autorización explícita antes de integrar o tocar producción; la presente fase se detiene antes de esos pasos.
+
+
+## Puerta adicional de fase 0.2
+
+- [ ] Anunciar cierre único de sesiones: cookies antiguas rechazadas; no fallback.
+- [ ] DATA_DIR exclusivo y escribible; `sessions.json` 0600, volumen persistente y
+  una sola réplica/proceso. Probar logout y reinicio con dos sesiones y empresas.
+- [ ] Probar cambio de contraseña, desactivar/reactivar y permisos sin revivir
+  cookies; no delegar admin global a una agencia.
+- [ ] Confirmar health 503 ante fallo del almacén y no declarar logout exitoso si
+  falló su persistencia. No resetear archivos corruptos a ciegas.
+- [ ] En recuperaciones usar registro nuevo y conservar metadata anterior privada;
+  no reactivar sesiones desde un backup obsoleto.
+- [ ] Revisar cuotas 2.000/20, TTL 12 h y límites ajenos a sesiones; no atribuir al
+  smoke pequeño capacidad para subidas de vídeo grandes o cargas multiempresa.
+- [ ] Revisar [fase 0.2](phase-02.md) y [propuesta de roles](authorization-proposal.md)
+  sin migrar usuarios reales automáticamente.

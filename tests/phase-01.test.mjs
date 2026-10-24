@@ -49,6 +49,10 @@ test('AI jobs: a known job ID is not enough to read another agency result',async
   const r=await f.request('/api/ai/rewrite',a,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:'Ficticio',kind:'publicacion'})});assert.equal(r.status,202);const {job}=await r.json();
   assert.equal((await f.request('/api/ai/jobs/'+job,b)).status,404);
   const own=await until(async()=>(await f.request('/api/ai/jobs/'+job,a)).json(),v=>v.status==='done');assert.match(own.result.text,/sintético/);
+  const owner=await f.login('testowner');
+  assert.equal((await f.request('/api/users/'+'a'.repeat(12),owner,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brands:['b']})})).status,200);
+  assert.equal((await f.request('/api/ai/jobs/'+job,a)).status,401);
+  assert.equal((await f.request('/api/ai/jobs/'+job,await f.login())).status,404);
  }finally{await f.close();await new Promise(r=>mock.close(r))}
 });
 test('migration plan detects same-brand duplicate IDs and unreferenced assets; never assigns them',async()=>{

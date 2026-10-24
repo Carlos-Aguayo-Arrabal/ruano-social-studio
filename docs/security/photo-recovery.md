@@ -74,3 +74,19 @@ editar el índice a ciegas para hacer desaparecer el error.
 El ensayo específico para un proyecto/volumen nuevo está en
 [staging-checklist.md](staging-checklist.md); los resultados reales y límites están
 en [phase-01.md](phase-01.md). No se han operado datos de clientes.
+
+
+## Sesiones después de una restauración (fase 0.2)
+
+El snapshot completo puede contener `sessions.json`. Su integridad no acredita
+que refleje revocaciones posteriores al backup. En el **directorio nuevo de
+restauración**, antes de activarlo, preservar esa metadata como histórico 0600
+fuera del registro activo y preparar un registro nuevo para exigir login de todos
+los usuarios. Conservar el snapshot original: no borrar ni modificar la copia
+que se utilizó para verificar recuperación. No recuperar sesiones activas de una
+copia antigua ni usar una imagen que vuelva a aceptar cookies stateless.
+
+Esta decisión debe estar incluida en el plan revisado del operador. No hay un
+borrado automático de sesiones en la herramienta de fotos y no se ha ejecutado
+sobre una restauración real. Ver [transición de sesiones](session-transition.md)
+y [operación/límites de fase 0.2](phase-02.md).

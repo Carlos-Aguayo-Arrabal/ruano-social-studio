@@ -86,3 +86,17 @@ test('corrupt/oversized storage fails closed without resetting it; failed revoca
   await rename(dir,dir+'-moved');await assert.rejects(store.revoke(token),e=>e.status===503);assert.throws(()=>store.resolve(token,()=>binding),e=>e.status===503);
  }finally{await rm(dir,{recursive:true,force:true});await rm(dir+'-moved',{recursive:true,force:true})}
 });
+
+test('recovery with a new session registry rejects pre-recovery cookies and preserves archived metadata',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'ruano-session-recovery-'));
+ try{
+  const store=await SessionStore.open(join(dir,'sessions.json')),token=await store.create('a',binding);
+  const snapshot=await readFile(join(dir,'sessions.json'));await store.revoke(token);
+  // Operator-reviewed recovery: archive old metadata, never reactivate it.
+  await writeFile(join(dir,'sessions.pre-recovery.json'),snapshot,{mode:0o600});
+  const recovered=await SessionStore.open(join(dir,'fresh-sessions.json'));
+  assert.equal(recovered.resolve(token,()=>binding),null);
+  assert.deepEqual(await readFile(join(dir,'sessions.pre-recovery.json')),snapshot);
+  assert.equal(JSON.parse(await readFile(join(dir,'sessions.json'))).sessions.length,0);
+ }finally{await rm(dir,{recursive:true,force:true})}
+});

@@ -1,5 +1,7 @@
 # Ruano Social Studio · fase 0.1 · 24/10/2026
 
+> Histórico de fase 0.1. La revocación de logout y los límites administrativos se actualizan en [fase 0.2](phase-02.md); no tratar los pendientes históricos como el estado actual de esas correcciones.
+
 ## Resultado y alcance
 
 **Preparada para un ensayo de staging aislado con datos sintéticos. No preparada para abrir un SaaS a clientes ni para desplegar a producción sin las validaciones operativas pendientes.**

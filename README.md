@@ -69,3 +69,13 @@ Nodemailer actualizado a 10.2.1; auditoría de dependencias bloqueante en CI.
 El smoke Docker usa únicamente contenedor/volumen sintéticos sin red:
 `node scripts/test-docker.mjs ruano-staging-check` tras construir esa imagen.
 No es un despliegue en Hostinger ni una autorización para operar fotografías reales.
+
+
+### Sesiones y autorización · fase 0.2
+
+[Impacto y transición documentados](docs/security/session-transition.md): esta
+versión rechaza cookies antiguas y exige nuevo login. Sesiones revocables en
+`DATA_DIR/sessions.json`, una sola réplica y volumen persistente.
+[Informe, pruebas y límites](docs/security/phase-02.md) y
+[matriz administrativa/propuesta pendiente](docs/security/authorization-proposal.md).
+No restaurar sesiones antiguas para recuperar accesos después de un backup.
