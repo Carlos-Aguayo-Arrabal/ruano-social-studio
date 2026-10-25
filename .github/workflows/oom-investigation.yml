@@ -6,13 +6,13 @@ permissions:
   contents: read
 jobs:
   diagnostic:
-    if: contains(github.event.head_commit.message, '[oom-diagnose]')
+    if: contains(github.event.head_commit.message, '[oom-diagnose]') || contains(github.event.head_commit.message, '[oom-controls]')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        mode: [original, legacy, host]
+        mode: ${{ fromJSON(contains(github.event.head_commit.message, '[oom-controls]') && '["sessions","uploads-only"]' || '["original","legacy","host"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,8 +31,10 @@ jobs:
         run: |
           if [ "$MODE" = original ]; then
             node scripts/test-soak-phase05-original.mjs ruano-staging-check
+          elif [ "$MODE" = legacy ]; then
+            SOAK_MONITOR=legacy SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
           else
-            SOAK_MONITOR="$MODE" SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
+            SOAK_MONITOR=host SOAK_TRAFFIC="$MODE" SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
           fi
       - uses: actions/upload-artifact@v4
         if: always()

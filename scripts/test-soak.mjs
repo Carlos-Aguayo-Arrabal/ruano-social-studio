@@ -20,7 +20,7 @@ assert.ok(['legacy','host'].includes(monitorMode));
 const diagArgs=diagnostics?['--env','NODE_OPTIONS=--import=/app/lib/oom-telemetry.mjs','--env','RUANO_MEMORY_LOG=/app/data/.process-memory.json']:[];
 let appPid;
 let madeApp=false,madeVolume=false;const extraVolumes=[],extraContainers=[];
-const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',clientMemoryBytes:512*1024*1024,productionData:false,monitorMode,diagnostics,cases,samples:[]};
+const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',clientMemoryBytes:512*1024*1024,productionData:false,monitorMode,diagnostics,traffic:process.env.SOAK_TRAFFIC||'mixed',cases,samples:[]};
 const state=async()=>{const [running,oomKilled,exitCode]=(await run(['inspect','--format','{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}}',app])).split(' ');return {running:running==='true',oomKilled:oomKilled==='true',exitCode:Number(exitCode)};};
 async function memory(){try{
  let m;if(monitorMode==='host')m=await hostMemory(appPid);
@@ -31,7 +31,7 @@ async function memory(){try{
  return m;
  }catch{return null}}
 try{
- const env=join(tmp,'synthetic.env');await writeFile(env,['APP_USERNAME=capacity-owner','APP_PASSWORD='+randomBytes(24).toString('hex'),'APP_SESSION_SECRET='+randomBytes(48).toString('hex'),'OLLAMA_URL=http://127.0.0.1:1'].join('\n'),{mode:0o600});
+ const env=join(tmp,'synthetic.env');await writeFile(env,['APP_USERNAME=capacity-owner','APP_PASSWORD='+randomBytes(24).toString('hex'),'APP_SESSION_SECRET='+randomBytes(48).toString('hex'),'OLLAMA_URL=http://127.0.0.1:1','SOAK_TRAFFIC='+(process.env.SOAK_TRAFFIC||'mixed')].join('\n'),{mode:0o600});
  await run(['volume','create',volume]);madeVolume=true;
  await run(['create','--name',app,'--network','none','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--memory-swap','256m','--cpus','1','--pids-limit','128','--env-file',env,...diagArgs,'--mount',`type=volume,source=${volume},target=/app/data`,'--health-interval','1s','--health-start-period','1s',image]);madeApp=true;await run(['start',app]);appPid=Number(await run(['inspect','--format','{{.State.Pid}}',app]));
  for(let i=0;i<40;i++){if(await run(['inspect','--format','{{.State.Health.Status}}',app])==='healthy')break;await new Promise(r=>setTimeout(r,500));}
@@ -75,22 +75,23 @@ for(const name of ['soaka1','soaka2','soakb1','soakb2']){const r=await req('/api
  let sustained;
  try{
  sustained=JSON.parse(await client(common+`
-const accounts=[];for(const name of ['soaka1','soaka2','soakb1','soakb2']){const r=await req('/login',{method:'POST',body:new URLSearchParams({username:name,password:process.env.APP_PASSWORD})});assert.equal(r.status,303);accounts.push({brand:name[4],headers:{Cookie:r.headers.get('set-cookie').split(';')[0]}});}
+const accounts=[];for(const name of ['soaka1','soaka2','soakb1','soakb2']){const r=await req('/login',{method:'POST',body:new URLSearchParams({username:name,password:process.env.APP_PASSWORD})});assert.equal(r.status,303);accounts.push({username:name,brand:name[4],headers:{Cookie:r.headers.get('set-cookie').split(';')[0]}});}
 const percentile=(xs,p)=>[...xs].sort((a,b)=>a-b)[Math.min(xs.length-1,Math.floor(xs.length*p))]||0;
 async function cancel(a){return new Promise(resolve=>{const start=performance.now(),out=httpRequest({hostname:'127.0.0.1',port:3000,path:'/api/media/'+a.brand+'/cancel?i=0&type=video',method:'PUT',headers:{...a.headers,'Content-Length':120*1024*1024}},r=>{r.resume();r.on('end',()=>resolve({status:r.statusCode}));});out.on('error',()=>resolve({intentionalCancellation:true,ms:Math.round(performance.now()-start)}));out.write(Buffer.from([0,0,0,0,102,116,121,112]));setTimeout(()=>out.destroy(),50);});}
 const phases=[];for(const concurrency of [1,2,8]){
- const startedAt=Date.now(),start=performance.now(),results=[],health=[],byTenant={a:{},b:{}};let batches=0,cancellations=0,oversized=0;
+ const startedAt=Date.now(),start=performance.now(),results=[],health=[],byTenant={a:{},b:{}};let batches=0,cancellations=0,oversized=0,sessionRotations=0;
  while(performance.now()-start<${phaseMs}){
-  const cycle=performance.now(),video=batches%10===0,bytes=video?120*1024*1024:batches%3===0?8*1024*1024:256*1024;
-  const batch=Promise.all(Array.from({length:concurrency},async(_,i)=>{const a=accounts[(batches+i)%4],r=await upload('/api/media/'+a.brand+'/slot-'+(i%4)+'?i=0'+(video?'&type=video':''),bytes,video,a.headers);byTenant[a.brand][String(r.status)]=(byTenant[a.brand][String(r.status)]||0)+1;return r;}));
+  const cycle=performance.now(),traffic=process.env.SOAK_TRAFFIC,video=traffic==='uploads-only'||batches%10===0,bytes=video?120*1024*1024:batches%3===0?8*1024*1024:256*1024;
+  const batch=Promise.all(Array.from({length:concurrency},async(_,i)=>{const a=accounts[(batches+i)%4];if(traffic==='sessions'){const begin=performance.now(),r=await req('/api/me',{headers:a.headers});await r.text();return {status:r.status,ms:Math.round(performance.now()-begin)};}const r=await upload('/api/media/'+a.brand+'/slot-'+(i%4)+'?i=0'+(video?'&type=video':''),bytes,video,a.headers);byTenant[a.brand][String(r.status)]=(byTenant[a.brand][String(r.status)]||0)+1;return r;}));
   const hs=performance.now(),h=await req('/health');await h.text();health.push({status:h.status,ms:Math.round(performance.now()-hs)});assert.equal(h.status,200);
   const r=await batch;results.push(...r);assert.ok(r.every(v=>[200,429].includes(v.status)),JSON.stringify({error:'unexpected upload outcome',concurrency,batches,bytes,results:r}));
-  if(batches%5===0){await cancel(accounts[batches%4]);cancellations++;}
-  if(batches%10===0){const over=await upload('/api/media/a/oversize?i=0',8*1024*1024+1,false,accounts[0].headers);assert.equal(over.status,413);oversized++;}
+  if(traffic==='sessions'&&batches%10===0){const a=accounts[batches%4],old=a.headers;const logout=await req('/logout',{headers:old});assert.equal(logout.status,303);await logout.text();const denied=await req('/api/me',{headers:old});assert.equal(denied.status,401);await denied.text();const login=await req('/login',{method:'POST',body:new URLSearchParams({username:a.username,password:process.env.APP_PASSWORD})});assert.equal(login.status,303);a.headers={Cookie:login.headers.get('set-cookie').split(';')[0]};sessionRotations++;}
+  if(traffic!=='sessions'&&batches%5===0){await cancel(accounts[batches%4]);cancellations++;}
+  if(traffic!=='sessions'&&batches%10===0){const over=await upload('/api/media/a/oversize?i=0',8*1024*1024+1,false,accounts[0].headers);assert.equal(over.status,413);oversized++;}
   if(batches%10===0){const cross=await req('/api/media/a/slot-0',{headers:accounts[2].headers});assert.equal(cross.status,403);await cross.text();}
   batches++;await new Promise(r=>setTimeout(r,Math.max(0,1000-(performance.now()-cycle))));
  }
- const times=results.map(r=>r.ms);phases.push({concurrency,startedAt,endedAt:Date.now(),durationMs:Math.round(performance.now()-start),batches,requests:results.length,statuses:results.reduce((m,r)=>(m[String(r.status)]=(m[String(r.status)]||0)+1,m),{}),byTenant,latencyMs:{p50:percentile(times,.5),p95:percentile(times,.95),p99:percentile(times,.99),max:Math.max(...times)},health:{requests:health.length,statuses:[...new Set(health.map(r=>r.status))],p95Ms:percentile(health.map(r=>r.ms),.95)},intentionalCancellations:cancellations,oversizedRejected:oversized,unexpectedFailures:results.filter(r=>![200,429].includes(r.status)).length});
+ const times=results.map(r=>r.ms);phases.push({concurrency,startedAt,endedAt:Date.now(),durationMs:Math.round(performance.now()-start),batches,requests:results.length,statuses:results.reduce((m,r)=>(m[String(r.status)]=(m[String(r.status)]||0)+1,m),{}),byTenant,latencyMs:{p50:percentile(times,.5),p95:percentile(times,.95),p99:percentile(times,.99),max:Math.max(...times)},health:{requests:health.length,statuses:[...new Set(health.map(r=>r.status))],p95Ms:percentile(health.map(r=>r.ms),.95)},sessionRotations,intentionalCancellations:cancellations,oversizedRejected:oversized,unexpectedFailures:results.filter(r=>![200,429].includes(r.status)).length});
 }
 const idleStartedAt=Date.now(),idleHealth=[];while(Date.now()-idleStartedAt<${idleSeconds*1000}){const r=await req('/health');await r.text();idleHealth.push(r.status);assert.equal(r.status,200);await new Promise(r=>setTimeout(r,1000));}console.log(JSON.stringify({phases,idle:{startedAt:idleStartedAt,endedAt:Date.now(),healthChecks:idleHealth.length,healthStatuses:[...new Set(idleHealth)]}}));`));
  }finally{sampling=false;await sampleLoop;}
