@@ -10,7 +10,7 @@ const image=process.argv[2]||'ruano-staging-check',id='ruano-capacity-'+randomUU
 const tmp=await mkdtemp(join(tmpdir(),'ruano-capacity-')),cases=[];
 const run=(args,input='')=>new Promise((resolve,reject)=>{const p=spawn('docker',args,{stdio:['pipe','pipe','pipe']});let out='',err='';p.stdout.on('data',b=>out+=b);p.stderr.on('data',b=>err+=b);p.on('error',reject);p.on('close',c=>c===0?resolve(out.trim()):reject(Error('docker '+args[0]+' exit '+c+': '+err.slice(0,500))));p.stdin.end(input);});
 let madeApp=false,madeVolume=false;
-const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',productionData:false,cases};
+const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',clientMemoryBytes:512*1024*1024,productionData:false,cases};
 const state=async()=>{const [running,oomKilled,exitCode]=(await run(['inspect','--format','{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}}',app])).split(' ');return {running:running==='true',oomKilled:oomKilled==='true',exitCode:Number(exitCode)};};
 async function memory(){try{const values=await run(['exec',app,'sh','-c',"for f in memory.current memory.peak memory.swap.current memory.swap.max; do cat /sys/fs/cgroup/$f; done; awk '/^anon /{print $2}' /sys/fs/cgroup/memory.stat; awk '/^VmRSS:/{print $2*1024}' /proc/1/status"]);const [currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,anonBytes,rssBytes]=values.split(/\s+/).map(Number);return {currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,anonBytes,rssBytes,includesFileCache:true};}catch{return null}}
 try{
@@ -20,7 +20,12 @@ try{
  for(let i=0;i<40;i++){if(await run(['inspect','--format','{{.State.Health.Status}}',app])==='healthy')break;await new Promise(r=>setTimeout(r,500));}
  assert.equal(await run(['inspect','--format','{{.State.Health.Status}}',app]),'healthy');
  assert.equal(await run(['inspect','--format','{{.HostConfig.NetworkMode}}',app]),'none');
- const client=script=>run(['run','--rm','-i','--network','container:'+app,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--env-file',env,image,'node','--input-type=module'],script);
+ const client=async script=>{
+  const name=id+'-client-'+randomUUID();
+  try{return await run(['run','--name',name,'-i','--network','container:'+app,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--memory-swap','512m','--cpus','1','--pids-limit','64','--env-file',env,image,'node','--input-type=module'],script);}
+  catch(e){const info=JSON.parse(await run(['inspect','--format','{{json .State}}',name]));(report.clientFailures||=[]).push({oomKilled:info.OOMKilled,exitCode:info.ExitCode});throw e;}
+  finally{await run(['rm','-f',name]).catch(()=>{});}
+ };
  const common=`import assert from 'node:assert/strict';import {Readable} from 'node:stream';import {performance} from 'node:perf_hooks';import {createHash} from 'node:crypto';import {request as httpRequest} from 'node:http';
 const req=(p,o={})=>fetch('http://127.0.0.1:3000'+p,{redirect:'manual',signal:AbortSignal.timeout(90000),...o});
 const login=await req('/login',{method:'POST',body:new URLSearchParams({username:process.env.APP_USERNAME,password:process.env.APP_PASSWORD})});assert.equal(login.status,303);
@@ -76,7 +81,7 @@ async function upload(path,bytes,video=false){const start=performance.now();retu
  report.success=true;
 }catch(err){report.success=false;report.failure=err.message;if(madeApp)report.finalState=await state();process.exitCode=1;console.error('Resource validation failed:',err.message);}
 finally{
- await mkdir('artifacts',{recursive:true});await writeFile('artifacts/resource-results.json',JSON.stringify(report,null,2));console.log('::notice title=Resource summary::'+JSON.stringify({success:report.success,failure:report.failure,memoryLimitBytes:report.memoryLimitBytes,caseCount:cases.length,disk:report.disk,restart:report.restart,finalState:report.finalState}));
+ await mkdir('artifacts',{recursive:true});await writeFile('artifacts/resource-results.json',JSON.stringify(report,null,2));console.log('::notice title=Resource summary::'+JSON.stringify({success:report.success,failure:report.failure,memoryLimitBytes:report.memoryLimitBytes,caseCount:cases.length,clientFailures:report.clientFailures,disk:report.disk,restart:report.restart,finalState:report.finalState}));
  const compact=cases.map(({results,memory,...c})=>({...c,...(results?{statuses:results.reduce((m,r)=>(m[String(r.status)]=(m[String(r.status)]||0)+1,m),{}),maxRequestMs:Math.max(...results.map(r=>r.ms||0)),networkErrors:results.filter(r=>r.networkError).map(r=>r.networkError)}:{}),memory}));
  for(let i=0;i<compact.length;i+=3)console.log('::notice title=Resource metrics '+(i/3+1)+'::'+JSON.stringify(compact.slice(i,i+3)));
  if(madeApp)await run(['rm','-f',app]);if(madeVolume)await run(['volume','rm',volume]);await rm(tmp,{recursive:true,force:true});
