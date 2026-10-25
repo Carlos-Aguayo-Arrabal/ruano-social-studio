@@ -1,24 +1,22 @@
-# Momentun — activación controlada de Codex (Social Studio)
+# Momentun: orquestación sin API de pago
 
-**Estado: propuesta no activada.** Este archivo pertenece a la rama `automation/momentun-codex-orchestrator`. El workflow solo podrá despacharse normalmente desde la rama predeterminada una vez revisado e integrado. No hay ejecución automática por finalización de PR y no se realiza `git push`, `merge` ni `deploy`.
+## Qué hace
 
-## Requisitos previos (requieren autorización)
+El workflow `.github/workflows/momentun-codex.yml` consulta PR abiertas mediante `GITHUB_TOKEN` de permisos de solo lectura y crea el artefacto `momentun-siguiente-prompt` con un encargo **predefinido**. No llama a OpenAI, no requiere `OPENAI_API_KEY`, no escribe al repositorio ni ejecuta tareas en Codex Cloud.
 
-1. Revisar el diff de la PR de automatización y la documentación de la acción `openai/codex-action@v1`.
-2. Comprobar política de seguridad, titularidad y límite de gastos de la API; usar una clave restringida y separada, guardada como **GitHub Actions secret** `OPENAI_API_KEY`. No pegar claves en archivos ni en conversaciones.
-3. Configurar la variable de repositorio `MOMENTUN_CODEX_ENABLED=true` solo después de autorizar el coste. Su ausencia mantiene el job omitido.
-4. Autorizar la incorporación del workflow a la rama predeterminada mediante revisión humana. Sin ese paso, `workflow_dispatch` no es una integración activa.
-5. Ejecutar la acción manualmente una vez y revisar coste, logs, salida, permisos y sanitización de artefactos.
+En la propuesta se incluye `workflow_dispatch` y una programación diaria. GitHub ejecuta programaciones normalmente desde la rama predeterminada; por ello, **no está activada** mientras permanezca en PR de borrador. Una vez aprobada y fusionada separadamente, descargar el artefacto desde Actions. Los retrasos o saltos de tareas programadas de GitHub son posibles.
 
-## Funcionamiento y límites
+## Costes y límites
 
-- Se activa **manualmente** (`workflow_dispatch`), no al terminar GitHub Actions. Produce solo un informe y un prompt propuesto en un artefacto con retención de siete días.
-- Usa checkout de la rama predeterminada. **No asume que las PR pendientes estén integradas**; sus resultados deben consultarse por separado. No usa documentos locales de Codex Cloud.
-- `permission-profile: :read-only` y `safety-strategy: drop-sudo` son medidas de defensa en profundidad, no sustituyen la revisión de los datos que puedan aparecer en logs o artefactos.
-- No existe conexión de escritura con una sesión abierta de Codex Cloud, ni flujo n8n configurado: **no encadena la ejecución de fases**.
-- La clave API y cualquier ejecución facturable requieren una decisión explícita del propietario; no hay límite económico impuesto por este YAML.
-- Antes de activar la ejecución automática se necesitarán detección fiable de SHA/PR, idempotencia, estado persistente de fases, aprobación de permisos y parada por errores.
+No hay consumo de tokens de API. GitHub Actions usa minutos de runner: en repositorios privados se descuentan de la cuota incluida del plan y podrían generar cargos **si la cuenta permite sobreconsumo facturable**. Revisar presupuesto/límites de facturación de GitHub antes de activar, o usar un runner propio aprobado. Se ha fijado `timeout-minutes: 5` y solo una ejecución diaria para minimizar consumo, pero esto no garantiza coste cero en todas las cuentas.
 
-## Política de seguridad
+## Lo que no hace
 
-Sin datos reales, secretos, Hostinger, producción, modificaciones de main, despliegues, merges ni compras. Cualquier resultado es una propuesta para revisión humana.
+- No envía prompts a una sesión Codex Cloud ni encadena ejecuciones.
+- No detecta de manera fiable el fin real de cada fase a partir de pruebas, ni avanza la numeración por sí mismo.
+- No interpreta riesgos complejos. Cada propuesta debe validarse manualmente.
+- No fusiona, despliega, toca Hostinger, VPS, dominios, secretos ni datos reales.
+
+## Siguiente nivel sin factura API
+
+Para ejecución local podría utilizarse Codex CLI autenticado mediante ChatGPT, si el usuario dispone de acceso dentro de los límites de su suscripción, en un equipo de confianza. Requiere configuración y verificación separadas; no trasladar tokens de sesión a GitHub ni al repositorio. Otra vía para análisis gratuito sin modelo es ampliar reglas fijas de GitHub/n8n.
