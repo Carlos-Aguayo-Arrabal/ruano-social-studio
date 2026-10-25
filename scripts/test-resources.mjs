@@ -67,6 +67,8 @@ async function upload(path,bytes,video=false){const start=performance.now();try{
  report.success=true;
 }catch(err){report.success=false;report.failure=err.message;if(madeApp)report.finalState=await state();process.exitCode=1;console.error('Resource validation failed:',err.message);}
 finally{
- await mkdir('artifacts',{recursive:true});await writeFile('artifacts/resource-results.json',JSON.stringify(report,null,2));console.log('::notice title=Resource complete report::'+JSON.stringify(report));
+ await mkdir('artifacts',{recursive:true});await writeFile('artifacts/resource-results.json',JSON.stringify(report,null,2));console.log('::notice title=Resource summary::'+JSON.stringify({success:report.success,failure:report.failure,memoryLimitBytes:report.memoryLimitBytes,caseCount:cases.length,disk:report.disk,restart:report.restart,finalState:report.finalState}));
+ const compact=cases.map(({results,memory,...c})=>({...c,...(results?{statuses:results.reduce((m,r)=>(m[String(r.status)]=(m[String(r.status)]||0)+1,m),{}),maxRequestMs:Math.max(...results.map(r=>r.ms||0)),networkErrors:results.filter(r=>r.networkError).map(r=>r.networkError)}:{}),memory}));
+ for(let i=0;i<compact.length;i+=3)console.log('::notice title=Resource metrics '+(i/3+1)+'::'+JSON.stringify(compact.slice(i,i+3)));
  if(madeApp)await run(['rm','-f',app]);if(madeVolume)await run(['volume','rm',volume]);await rm(tmp,{recursive:true,force:true});
 }
