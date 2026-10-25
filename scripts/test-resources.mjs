@@ -39,22 +39,22 @@ async function upload(path,bytes,video=false){const start=performance.now();try{
   ['video-over-120MiB','/api/media/capacity/video?i=0&type=video',120*MiB+1,true,'reject'],
  ]){
   const value=JSON.parse(await client(common+`console.log(JSON.stringify(await upload(${JSON.stringify(path)},${bytes},${video})));`));
-  const observed=await state();const result={name,bytes,expected,...value,...observed,memory:await memory()};cases.push(result);console.log('::notice title=Resource case::'+JSON.stringify(result));
+  const observed=await state();const result={name,bytes,expected,...value,...observed,memory:await memory()};cases.push(result);console.log('Resource case '+JSON.stringify(result));
   assert.equal(observed.running,true,'Application terminated during '+name);assert.equal(observed.oomKilled,false,'OOM during '+name);
   if(expected==='reject')assert.equal(value.status,413,name);else assert.equal(value.status,expected,name);
  }
  for(const concurrency of [4,8]){
   const result=JSON.parse(await client(common+`const start=performance.now();const results=await Promise.all(Array.from({length:${concurrency}},(_,i)=>upload('/api/media/capacity/concurrent-'+i+'?i=0',256*1024)));console.log(JSON.stringify({results,totalMs:Math.round(performance.now()-start)}));`));
   assert.ok(result.results.every(v=>[200,429].includes(v.status)));assert.ok(result.results.some(v=>v.status===200));const observed=await state();assert.equal(observed.running,true);assert.equal(observed.oomKilled,false);
-  const item={name:'concurrent-256KiB-images',concurrency,...result,...observed,memory:await memory()};cases.push(item);console.log('::notice title=Resource concurrency::'+JSON.stringify(item));
+  const item={name:'concurrent-256KiB-images',concurrency,...result,...observed,memory:await memory()};cases.push(item);console.log('Resource concurrency '+JSON.stringify(item));
  }
  for(const concurrency of [1,2,4,8,16,32]){
   const result=JSON.parse(await client(common+`const start=performance.now();const pending=Promise.all(Array.from({length:${concurrency}},(_,i)=>upload('/api/media/capacity/large-'+i+'?i=0&type=video',120*1024*1024,true)));const health=await req('/health');await health.text();const results=await pending;console.log(JSON.stringify({results,healthStatus:health.status,totalMs:Math.round(performance.now()-start)}));`));
-  const observed=await state(),item={name:'concurrent-120MiB-videos',concurrency,...result,...observed,memory:await memory()};cases.push(item);console.log('::notice title=Resource videos::'+JSON.stringify(item));
+  const observed=await state(),item={name:'concurrent-120MiB-videos',concurrency,...result,...observed,memory:await memory()};cases.push(item);console.log('Resource videos '+JSON.stringify(item));
   assert.equal(observed.running,true,'Application terminated during concurrent valid videos');assert.equal(observed.oomKilled,false,'OOM during concurrent videos');assert.equal(result.healthStatus,200);assert.ok(result.results.every(r=>[200,429].includes(r.status)));assert.ok(result.results.some(r=>r.status===200));
  }
  const download=JSON.parse(await client(common+`const start=performance.now();const results=await Promise.all(Array.from({length:4},async()=>{const r=await req('/api/media/capacity/video/0.mp4',{headers});let bytes=0;const hash=createHash('sha256');for await(const chunk of r.body){bytes+=chunk.length;hash.update(chunk);}return {status:r.status,bytes,sha256:hash.digest('hex')};}));console.log(JSON.stringify({results,totalMs:Math.round(performance.now()-start)}));`));
- const downloadCase={name:'concurrent-120MiB-downloads',concurrency:4,...download,...await state(),memory:await memory()};cases.push(downloadCase);console.log('::notice title=Resource downloads::'+JSON.stringify(downloadCase));
+ const downloadCase={name:'concurrent-120MiB-downloads',concurrency:4,...download,...await state(),memory:await memory()};cases.push(downloadCase);console.log('Resource downloads '+JSON.stringify(downloadCase));
  assert.ok(download.results.every(r=>r.status===200&&r.bytes===120*MiB));assert.equal(downloadCase.running,true);assert.equal(downloadCase.oomKilled,false);
  await run(['restart',app]);
  for(let i=0;i<40;i++){if(await run(['inspect','--format','{{.State.Health.Status}}',app])==='healthy')break;await new Promise(r=>setTimeout(r,500));}
@@ -67,6 +67,6 @@ async function upload(path,bytes,video=false){const start=performance.now();try{
  report.success=true;
 }catch(err){report.success=false;report.failure=err.message;if(madeApp)report.finalState=await state();process.exitCode=1;console.error('Resource validation failed:',err.message);}
 finally{
- await mkdir('artifacts',{recursive:true});await writeFile('artifacts/resource-results.json',JSON.stringify(report,null,2));console.log('::notice title=Resource summary::'+JSON.stringify({success:report.success,caseCount:cases.length,memoryLimitBytes:report.memoryLimitBytes,disk:report.disk,restart:report.restart,finalState:report.finalState}));
+ await mkdir('artifacts',{recursive:true});await writeFile('artifacts/resource-results.json',JSON.stringify(report,null,2));console.log('::notice title=Resource complete report::'+JSON.stringify(report));
  if(madeApp)await run(['rm','-f',app]);if(madeVolume)await run(['volume','rm',volume]);await rm(tmp,{recursive:true,force:true});
 }

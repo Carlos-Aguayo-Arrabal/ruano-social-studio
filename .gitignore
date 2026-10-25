@@ -4,3 +4,6 @@ playwright-report/
 test-results/
 artifacts/
 npm-audit.json
+
+# Generated local staging credentials must never enter Git.
+synthetic.env
