@@ -6,20 +6,25 @@ permissions:
   contents: read
 jobs:
   diagnostic:
-    if: contains(github.event.head_commit.message, '[oom-diagnose]') || contains(github.event.head_commit.message, '[oom-controls]')
+    if: contains(github.event.head_commit.message, '[oom-diagnose]') || contains(github.event.head_commit.message, '[oom-controls]') || contains(github.event.head_commit.message, '[oom-baseline]')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        mode: ${{ fromJSON(contains(github.event.head_commit.message, '[oom-controls]') && '["sessions","uploads-only"]' || '["original","legacy","host"]') }}
+        mode: ${{ fromJSON(contains(github.event.head_commit.message, '[oom-baseline]') && '["baseline-uploads-only"]' || contains(github.event.head_commit.message, '[oom-controls]') && '["sessions","uploads-only"]' || '["original","legacy","host"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Build with the phase 0.5 Node base
+        env:
+          MODE: ${{ matrix.mode }}
         run: |
+          if [ "$MODE" = baseline-uploads-only ]; then
+            git show 72d4853:lib/binary-transfer.mjs > lib/binary-transfer.mjs
+          fi
           docker pull node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
           docker build --build-arg NODE_IMAGE=node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 -t ruano-staging-check .
       - name: Reproduce configuration without accepting OOM as success
@@ -34,7 +39,7 @@ jobs:
           elif [ "$MODE" = legacy ]; then
             SOAK_MONITOR=legacy SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
           else
-            SOAK_MONITOR=host SOAK_TRAFFIC="$MODE" SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
+            SOAK_MONITOR=host SOAK_TRAFFIC="${MODE#baseline-}" SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
           fi
       - uses: actions/upload-artifact@v4
         if: always()
