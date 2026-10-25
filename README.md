@@ -89,3 +89,12 @@ streaming de medios, controles de temporales y ensayo Docker con 256 MiB sin swa
 locales con datos sintéticos. Staging requiere **una réplica**; el diagnóstico de
 sesiones demuestra que varias instancias todavía no están soportadas.
 No se ha desplegado en Hostinger ni se autoriza producción.
+
+### Subidas y estabilidad · fase 0.4
+
+[Informe, pruebas y métricas](docs/security/phase-04.md): panel de progreso,
+cancelación, 429 con reintento e idempotencia de fotos; cuotas de subidas activas
+por usuario/empresa y carga Docker sostenida con datos sintéticos.
+La [checklist de staging](docs/security/staging-checklist.md) mantiene una réplica,
+volumen y secretos independientes y validación pendiente de TLS/red/recuperación.
+No se ha creado ni desplegado infraestructura en Hostinger.

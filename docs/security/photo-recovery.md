@@ -90,3 +90,21 @@ Esta decisión debe estar incluida en el plan revisado del operador. No hay un
 borrado automático de sesiones en la herramienta de fotos y no se ha ejecutado
 sobre una restauración real. Ver [transición de sesiones](session-transition.md)
 y [operación/límites de fase 0.2](phase-02.md).
+
+
+## Interrupciones y cola de subidas · fase 0.4
+
+La cola del navegador conserva blobs solo en memoria. Antes de una recuperación
+o un ensayo offline, parar las escrituras, avisar a los operadores sintéticos y
+cerrar/descartar las tareas pendientes; no reintentar automáticamente tareas sobre
+un snapshot restaurado. Tras recuperar, iniciar sesiones nuevas y revisar galería
+y hashes antes de seleccionar otra vez fotografías. No reactivar sesiones de un
+registro antiguo.
+
+El reintento de una misma foto usa clave estable, usuario/empresa/inmueble y
+secreto de entorno estable; no garantiza deduplicación tras rotar ese secreto ni
+restaurar un estado anterior. No se rota ningún secreto ni se migra nada por esta
+fase. La limpieza de arranque solo retira temporales reservados `.upload-*.tmp`
+del formato exacto del servidor en árboles de recursos; no reasigna propietarios
+ni elimina fotografías finales. Las colisiones/huérfanas siguen sin asignarse y
+requieren el plan revisado y la copia/restauración verificadas anteriores.

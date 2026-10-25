@@ -114,3 +114,32 @@ Repetir `check`/`test`/`audit` con Node 22 y 24, o revisar la matriz del mismo S
 - [ ] Probar en el entorno nuevo subida/descarga de un reel reproducible, límites exactos/+1 byte, 429 y reintento manual; vigilar memoria, disco y salud. Registrar métricas y capacidad disponible del VPS nuevo sin cargas sobre producción.
 - [ ] Backup externo protegido del staging y restauración a volumen nuevo ensayados; presupuesto de disco para originales + temporales + snapshot + restauración + copia. Cero recolección o migración de fotografías reales en esta fase.
 - [ ] Sin auto-deploy de rama/PR, sin fusión y sin operación de producción. Obtener autorización expresa para crear infraestructura real antes de aplicar esta preparación.
+
+## Puerta de fase 0.4: UX, cuotas y estabilidad
+
+Referencia vigente: [phase-04.md](phase-04.md). Las métricas anteriores conservan el SHA que las produjo.
+
+- [ ] Revisar el commit de código, informe sostenido y CI final Node 22/24, Chromium, audit y Docker. No considerar un fallo del generador de carga como una prueba ejecutada satisfactoriamente.
+- [ ] Probar panel de subidas: cola, progreso, espera de confirmación, 429 + Retry-After, reintento sin duplicados, desconexión después de guardar, cancelación y 413. Revisar que cambiar de empresa no altera el destino y cambiar de cuenta impide reintentar la tarea antigua.
+- [ ] Informar que recargar/cerrar el navegador pierde archivos pendientes en memoria; cancelar no deshace un commit que ya terminó. Confirmar en la galería antes de una selección nueva. Un reintento de la misma tarea conserva clave y blob.
+- [ ] Aceptar cuotas activas: global 4, usuario 2 y empresa 3; observar 429 y reintentos con dos pestañas. No confundir concurrencia con cuotas de disco, rate limiting o reparto justo garantizado.
+- [ ] Limitar el dataset sintético y vigilar disco. Reservar originales, hasta 480 MiB de temporales activos globales, snapshot y restauración de ensayo. No hay cuota persistente de disco por usuario/empresa ni atribución histórica de autor implantada.
+- [ ] Generar **otro directorio nuevo** con `scripts/prepare-staging.mjs`, conservar env 0600 sin Git/logs, validar `docker compose -f <nuevo>/compose.yml config --quiet`. Este comando no autoriza `up` ni crea infraestructura.
+- [ ] Referencia manual EasyPanel: una réplica/proceso, actualización stop-first, sin auto-deploy, 1 CPU/256 MiB y swap desactivado realmente comprobados, UID/GID 1000, volumen nuevo, raíz readonly y tmpfs; no importar el Compose aislado como si fuera una definición Swarm validada.
+- [ ] Antes de habilitar acceso, validar dominio/TLS/renovación y perímetro sobre **todas** las rutas; puerto solo interno, red nueva y sin producción, egress restringido, proxy sobrescribe cabeceras. Ningún proveedor real.
+- [ ] Ensayar SIGKILL durante una subida sintética, reinicio, SHA-256 del archivo previo, 404 del incompleto, cero temporales y sesiones/revocaciones persistentes. Una salida 137 inducida no debe etiquetarse OOM si OOMKilled es falso.
+- [ ] Repetir carga sostenida más larga y un reel reproducible sobre el proxy real del nuevo staging; registrar CPU, memoria, disco, latencia, estados HTTP y salud. Definir monitorización y parada ante poco disco o inestabilidad antes de exponerlo.
+- [ ] Backup/restauración externos verificados, sesiones nuevas tras recuperación y fotos ambiguas sin reasignar. No copiar fotografías ni snapshots reales al ensayo.
+- [ ] PR #3 sigue en borrador. Una decisión explícita y separada debe autorizar únicamente el primer staging aislado; no main, fusión, publicación ni producción.
+
+
+### Evidencias automáticas de fase 0.4
+
+- [x] Código `80cfcb3`: CI Node 22/24 y Docker verdes, 72/72 pruebas por runtime; audit 0.
+- [x] 181,30 s de carga sintética, 526 subidas, 0 fallos inesperados, 158 health HTTP 200; cancelaciones/excesos y cuotas observados.
+- [x] Interrupción SIGKILL con temporal observado, recuperación del archivo previo por SHA-256, incompleto 404, cero temporales y OOMKilled falso.
+- [x] Configuración generada validada con Compose sin iniciar servicios ni volúmenes; proyecto y env sintéticos independientes.
+- [ ] Revisar crecimiento de RSS y repetir soak prolongado en el nuevo staging; los tres minutos de CI no descartan fugas.
+- [ ] Verificar que el proxy no introduce buffering ilimitado de subidas/descargas y que límites de tamaño/timeout conservan los 120 MiB permitidos sin aumentar recursos para ocultar fallos.
+
+Los checks del HEAD de documentación se enlazan en la PR. Ninguna casilla automática da por verificados TLS, DNS, egress, volúmenes, recursos Swarm ni backups externos reales.

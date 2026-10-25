@@ -1,0 +1,134 @@
+{
+  "sha": "80cfcb3e5bed4d1fb0aaaf0a10cd3878f034bcc3",
+  "run": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40182903549",
+  "summary": {
+    "success": true,
+    "profile": {
+      "samples": 173,
+      "durationMs": 180925,
+      "peakCgroupBytes": 269029376,
+      "maxSampledRssBytes": 110448640,
+      "maxSampledAnonBytes": 44580864,
+      "startRssBytes": 85487616,
+      "endRssBytes": 97333248,
+      "swapMaxBytes": 0,
+      "cpuAveragePercent": 19.31785546497167,
+      "cpuP95Percent": 83.064046021093,
+      "cpuMaxSampledPercent": 104.42986279257465
+    },
+    "interruption": {
+      "intentionalSigkill": true,
+      "partialObserved": true,
+      "oomKilled": false,
+      "oldValidFilePreserved": true,
+      "sha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+      "incompleteVideoStatus": 404,
+      "remainingPartials": 0,
+      "healthyAfterRestart": true
+    }
+  },
+  "phases": [
+    {
+      "concurrency": 1,
+      "durationMs": 60253,
+      "batches": 60,
+      "requests": 60,
+      "statuses": {
+        "200": 60
+      },
+      "byTenant": {
+        "a": {
+          "200": 30
+        },
+        "b": {
+          "200": 30
+        }
+      },
+      "latencyMs": {
+        "p50": 4,
+        "p95": 753,
+        "p99": 843,
+        "max": 843
+      },
+      "health": {
+        "requests": 60,
+        "statuses": [
+          200
+        ],
+        "p95Ms": 7
+      },
+      "intentionalCancellations": 12,
+      "oversizedRejected": 6,
+      "unexpectedFailures": 0
+    },
+    {
+      "concurrency": 2,
+      "durationMs": 60778,
+      "batches": 53,
+      "requests": 106,
+      "statuses": {
+        "200": 106
+      },
+      "byTenant": {
+        "a": {
+          "200": 54
+        },
+        "b": {
+          "200": 52
+        }
+      },
+      "latencyMs": {
+        "p50": 14,
+        "p95": 2217,
+        "p99": 2733,
+        "max": 2739
+      },
+      "health": {
+        "requests": 53,
+        "statuses": [
+          200
+        ],
+        "p95Ms": 8
+      },
+      "intentionalCancellations": 11,
+      "oversizedRejected": 6,
+      "unexpectedFailures": 0
+    },
+    {
+      "concurrency": 8,
+      "durationMs": 60266,
+      "batches": 45,
+      "requests": 360,
+      "statuses": {
+        "200": 180,
+        "429": 180
+      },
+      "byTenant": {
+        "a": {
+          "200": 90,
+          "429": 90
+        },
+        "b": {
+          "200": 90,
+          "429": 90
+        }
+      },
+      "latencyMs": {
+        "p50": 8,
+        "p95": 3653,
+        "p99": 4137,
+        "max": 4144
+      },
+      "health": {
+        "requests": 45,
+        "statuses": [
+          200
+        ],
+        "p95Ms": 47
+      },
+      "intentionalCancellations": 9,
+      "oversizedRejected": 5,
+      "unexpectedFailures": 0
+    }
+  ]
+}

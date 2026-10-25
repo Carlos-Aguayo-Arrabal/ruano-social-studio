@@ -1,11 +1,10 @@
-# Estado GitHub · fase 0.3 · 25/10/2026
+# Estado GitHub · fase 0.4 · 25/10/2026
 
-- PR [#3](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/pull/3), **borrador** hacia `main`; misma rama `security/phase-0-2026-10-24`.
-- Código de carga verificado: `9078ea1`; [CI de PR 40180699243](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40180699243) con Node 22/24, Chromium, auditoría y Docker verdes. La descripción de la PR enlaza los checks del HEAD posterior de documentación.
-- **66/66** pruebas por runtime, 15 casos de carga Docker, audit **0**. Una réplica, 256 MiB reales en cgroup, swap 0. Vídeo de 120 MiB pasa, exceso 413 y admisión 429 a partir del lote de ocho solicitudes; cuatro descargas grandes y hashes tras restart correctos.
-- Fallos iniciales conservados: OOM original `ca84afd` y salida 137 del cliente separado en `c39421a`; [informe y evidencias](phase-03.md). El builder local sigue bloqueado por DNS de npm; Actions construye correctamente.
-- No se fusiona, despliega, crea infraestructura, cambia main ni opera Hostinger/datos/credenciales reales. `main` observado sin cambios: `6d94fa3e7a4995a5479253761925c53e8ea6e029`.
+- PR [#3](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/pull/3) **borrador**, rama `security/phase-0-2026-10-24` hacia main; sin fusión ni despliegue.
+- Código medido: `80cfcb3e5bed4d1fb0aaaf0a10cd3878f034bcc3`; [CI PR 40182903549](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40182903549), Node 22/24 y Docker verdes. La PR enlaza también los checks del HEAD posterior de documentación.
+- **72/72 pruebas por runtime**, incluido Chromium, y npm audit **0**. UX con progreso, cancelar, 429/reintento, idempotencia, destino fijo y rechazo de cambio de cuenta.
+- Carga sostenida: **181,30 s**, 526 subidas (346 HTTP 200 / 180 HTTP 429), 0 fallos inesperados, 158 health HTTP 200; CPU media 19,32 %, sin OOM/swap, archivo previo conservado tras SIGKILL y cero temporales. El informe describe las muestras de RSS y sus límites.
+- El primer generador falló por sintaxis antes de la carga; se conserva la evidencia, sin atribuirle éxito. [Informe, métricas, archivos y commits](phase-04.md).
+- Staging propuesto: una réplica/proceso, proyecto/volumen/env sintéticos independientes, sin infraestructura creada. TLS/red/volumen/recuperación externos pendientes. Cuotas persistentes y soak prolongado pendientes; no tráfico abierto/producción.
 
-[Checklist de preparación](staging-checklist.md), [recuperación](photo-recovery.md), [transición de sesiones](session-transition.md) y [propuesta de autorización pendiente](authorization-proposal.md). Varias instancias no están soportadas: el diagnóstico sintético reproduce una revocación incoherente entre procesos. El TLS/perímetro y las copias externas del VPS siguen pendientes de futura validación autorizada.
-
-[Phase 0.1](phase-01.md) y [phase 0.2](phase-02.md) conservan sus resultados históricos. No atribuir CI verde de un SHA a código posterior.
+[Checklist vigente](staging-checklist.md), [recuperación](photo-recovery.md), [transición de sesiones](session-transition.md). Las fases anteriores conservan sus métricas por SHA: [0.1](phase-01.md), [0.2](phase-02.md), [0.3](phase-03.md). No atribuir a un SHA resultados de código posterior.
