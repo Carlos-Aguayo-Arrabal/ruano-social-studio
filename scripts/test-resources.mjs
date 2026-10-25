@@ -21,12 +21,21 @@ try{
  assert.equal(await run(['inspect','--format','{{.State.Health.Status}}',app]),'healthy');
  assert.equal(await run(['inspect','--format','{{.HostConfig.NetworkMode}}',app]),'none');
  const client=script=>run(['run','--rm','-i','--network','container:'+app,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--env-file',env,image,'node','--input-type=module'],script);
- const common=`import assert from 'node:assert/strict';import {Readable} from 'node:stream';import {performance} from 'node:perf_hooks';import {createHash} from 'node:crypto';
+ const common=`import assert from 'node:assert/strict';import {Readable} from 'node:stream';import {performance} from 'node:perf_hooks';import {createHash} from 'node:crypto';import {request as httpRequest} from 'node:http';
 const req=(p,o={})=>fetch('http://127.0.0.1:3000'+p,{redirect:'manual',signal:AbortSignal.timeout(90000),...o});
 const login=await req('/login',{method:'POST',body:new URLSearchParams({username:process.env.APP_USERNAME,password:process.env.APP_PASSWORD})});assert.equal(login.status,303);
 const cookie=login.headers.get('set-cookie').split(';')[0],headers={Cookie:cookie};
 function body(bytes,video=false){return Readable.from((async function*(){let sent=0;const first=Buffer.alloc(Math.min(bytes,65536));if(video)first.write('ftyp',4);else{first[0]=255;first[1]=216;first[2]=255;}yield first;sent+=first.length;while(sent<bytes){const n=Math.min(65536,bytes-sent);yield Buffer.alloc(n);sent+=n;}})());}
-async function upload(path,bytes,video=false){const start=performance.now();try{const r=await req(path,{method:'PUT',headers,body:body(bytes,video),duplex:'half'});await r.arrayBuffer();return {status:r.status,ms:Math.round(performance.now()-start)};}catch(e){return {status:null,networkError:e.cause?.code||e.name,ms:Math.round(performance.now()-start)};}}`;
+async function upload(path,bytes,video=false){const start=performance.now();return new Promise(resolve=>{
+ let done=false;const source=body(bytes,video),finish=value=>{if(done)return;done=true;source.destroy();resolve({...value,ms:Math.round(performance.now()-start)});};
+ const out=httpRequest({hostname:'127.0.0.1',port:3000,path,method:'PUT',headers},r=>{
+  // Early 413/429 must stop generation; fetch/undici kept generating rejected
+  // synthetic bodies at high concurrency and exhausted the CLIENT cgroup.
+  source.unpipe(out);source.destroy();if(!out.writableEnded)out.end();
+  r.resume();r.on('end',()=>finish({status:r.statusCode}));r.on('error',e=>finish({status:r.statusCode,networkError:e.code||e.name}));
+ });
+ out.setTimeout(90000,()=>out.destroy(Error('synthetic client timeout')));out.on('error',e=>finish({status:null,networkError:e.code||e.name}));source.on('error',e=>out.destroy(e));source.pipe(out);
+});}`;
  await client(common+`const r=await req('/api/sync',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({brands:{upsert:[{id:'capacity',name:'Synthetic capacity'}]},data:{capacity:{properties:{upsert:[{id:101,title:'Synthetic'}]}}}})});assert.equal(r.status,200);`);
  report.baselineMemory=await memory();assert.equal(report.baselineMemory?.swapMaxBytes,0,"Swap must be disabled for capacity validation");
  const MiB=1024*1024;
