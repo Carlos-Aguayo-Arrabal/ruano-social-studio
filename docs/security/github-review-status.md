@@ -1,9 +1,11 @@
-# Estado GitHub · fase 0.2 · 24/10/2026
+# Estado GitHub · fase 0.3 · 25/10/2026
 
-- PR [#3](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/pull/3), borrador hacia `main`, misma rama `security/phase-0-2026-10-24`.
-- Estrategia incompatible documentada antes del código: `afd1065`. Implementación inicial de sesiones persistentes: `dada4f6`.
-- CI inicial: [push 40123931532](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40123931532) y [PR 40123935904](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40123935904). Los checks del último HEAD y resultados finales se enlazan en la descripción de la PR.
-- Se mantienen matriz Node 22/24, Chromium, audit bloqueante y Docker sin red/datos reales. El smoke Docker ahora verifica también revocación persistente y continuidad de otra sesión tras reiniciar.
-- No se fusiona, despliega ni modifica Hostinger. No se operan usuarios o credenciales reales.
+- PR [#3](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/pull/3), **borrador** hacia `main`; misma rama `security/phase-0-2026-10-24`.
+- Código de carga verificado: `389cba1`; [CI de PR 40180292748](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40180292748) con Node 22/24, Chromium, auditoría y Docker verdes. La descripción de la PR enlaza los checks del HEAD posterior de documentación.
+- **65/65** pruebas por runtime, 15 casos de carga Docker, audit **0**. Una réplica, 256 MiB reales en cgroup, swap 0. Vídeo de 120 MiB pasa, exceso 413 y admisión 429 a partir del lote de ocho solicitudes; cuatro descargas grandes y hashes tras restart correctos.
+- Fallos iniciales conservados: OOM original `ca84afd` y salida 137 del cliente separado en `c39421a`; [informe y evidencias](phase-03.md). El builder local sigue bloqueado por DNS de npm; Actions construye correctamente.
+- No se fusiona, despliega, crea infraestructura, cambia main ni opera Hostinger/datos/credenciales reales. `main` observado sin cambios: `6d94fa3e7a4995a5479253761925c53e8ea6e029`.
 
-La fase 0.1 sigue como histórico. [Fase 0.2](phase-02.md) documenta sesiones, pruebas y límites; [transición](session-transition.md) exige nuevo login para cookies antiguas. [Propuesta de autorización](authorization-proposal.md) no migra roles automáticamente. El último resultado de Actions debe verificarse por SHA, sin atribuir a una revisión pruebas añadidas después.
+[Checklist de preparación](staging-checklist.md), [recuperación](photo-recovery.md), [transición de sesiones](session-transition.md) y [propuesta de autorización pendiente](authorization-proposal.md). Varias instancias no están soportadas: el diagnóstico sintético reproduce una revocación incoherente entre procesos. El TLS/perímetro y las copias externas del VPS siguen pendientes de futura validación autorizada.
+
+[Phase 0.1](phase-01.md) y [phase 0.2](phase-02.md) conservan sus resultados históricos. No atribuir CI verde de un SHA a código posterior.

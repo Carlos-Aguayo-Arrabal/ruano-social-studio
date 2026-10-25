@@ -66,3 +66,51 @@ Ver [procedimiento offline detallado](photo-recovery.md). No reutilizar un rollb
   smoke pequeño capacidad para subidas de vídeo grandes o cargas multiempresa.
 - [ ] Revisar [fase 0.2](phase-02.md) y [propuesta de roles](authorization-proposal.md)
   sin migrar usuarios reales automáticamente.
+
+## Fase 0.3: preparación reproducible y puertas operativas
+
+Informe vigente: [phase-03.md](phase-03.md). Los documentos anteriores conservan sus resultados históricos.
+
+### Preparar archivos, sin crear infraestructura
+
+Desde el checkout revisado y Node 22/24:
+
+```sh
+node scripts/prepare-staging.mjs /tmp/ruano-staging-review-NUEVO
+```
+
+Solo crea un directorio privado nuevo (0700), `synthetic.env` (0600), `compose.yml` y `easypanel-plan.json`. El nombre de proyecto UUID y su volumen son independientes; la contraseña y la clave de sesiones son aleatorias y sintéticas. No imprime sus valores, no lee configuración de producción, no conecta con Docker/EasyPanel/DNS y se niega a sobrescribir un directorio existente. Proteger y conservar ese env para los reinicios; regenerarlo puede invalidar sesiones. No incorporarlo a Git ni copiarlo a esta PR.
+
+El dominio generado termina en `.example.invalid`: es un placeholder reservado, no un dominio provisionado. El JSON de EasyPanel es una **referencia manual**, no un payload para su API. El Compose aislado no tiene puertos ni red y no permite acceso web desde fuera. No ejecutarlo en Hostinger bajo esta autorización.
+
+### Repetir las validaciones aisladas
+
+```sh
+npm ci --no-fund
+npx playwright install --with-deps chromium
+npm run check
+npm test
+npm audit
+node scripts/probe-replicas.mjs
+docker build -t ruano-staging-check .
+node scripts/test-docker.mjs ruano-staging-check
+node scripts/test-resources.mjs ruano-staging-check
+```
+
+Repetir `check`/`test`/`audit` con Node 22 y 24, o revisar la matriz del mismo SHA en Actions. El diagnóstico multiinstancia **debe informar que no está soportada**; terminar el diagnóstico no significa que sea seguro escalar. Los ensayos Docker crean y limpian únicamente recursos locales UUID propios. El ensayo de carga usa un cliente desechable en cgroup separado, comparte solo la red loopback sin salida del contenedor de aplicación y escribe `artifacts/resource-results.json` sin cookies/contraseñas. Máximo ensayado: 32 solicitudes simultáneas, cada una de hasta 120 MiB; algunas se rechazan con 429 por admisión. No requiere servicios externos ni proveedores de pago.
+
+### Antes de solicitar una futura creación de staging en EasyPanel
+
+- [ ] CI verde del SHA revisado, informe de carga completo, audit sin hallazgos y PR todavía en borrador. Revisar los fallos originales, no ocultarlos con un nuevo presupuesto.
+- [ ] Proyecto nuevo y volumen vacío con nombres independientes; comprobar disponibilidad de los nombres en la futura tarea autorizada, sin tocar ni reutilizar proyectos, redes o volúmenes existentes.
+- [ ] Una réplica, un proceso Node 22, 1 CPU, 256 MiB RAM y swap desactivado según resultados de la carga. En Swarm/EasyPanel comprobar el límite real aplicado en runtime; no asumir que `memswap_limit` de Compose se traduce automáticamente. No hacer actualizaciones con dos tareas superpuestas sobre el volumen.
+- [ ] UID/GID 1000 y volumen persistente `/app/data`; filesystem raíz read-only, tmpfs `/tmp` de 32 MiB, sin capabilities/privilegios, 128 PIDs. Verificar que la versión del panel admite estos controles; cualquier desviación exige revisión.
+- [ ] Puerto interno 3000, ningún puerto publicado directamente en el host. Red nueva exclusiva de staging para el proxy; ningún acceso a red privada, servicios, datos o sockets de producción. Verificar egress y acceso desde/hacia otros proyectos.
+- [ ] Subdominio nuevo autorizado, TLS válido con renovación comprobada, HTTP redirigido a HTTPS y autenticación/allowlist perimetral en **todas** las rutas, incluidas las públicas y archivos firmados. Health interno puede usar loopback sin atravesar el perímetro.
+- [ ] Proxy sobrescribe cabeceras reenviadas, no confía en valores del cliente; `PUBLIC_URL` coincide exactamente con el origen HTTPS nuevo. No usar el placeholder `.invalid` como dominio real ni desactivar validación TLS para pasar una prueba.
+- [ ] Secretos solo sintéticos propios, mismo `APP_SESSION_SECRET` tras restart, integraciones reales ausentes; `OLLAMA_URL=http://127.0.0.1:1` mientras no exista un simulador autorizado. No copiar `.env` de producción.
+- [ ] Dataset ficticio con dos empresas y usuarios independientes, ID de inmueble duplicado, huérfana y plan ambiguo. Backup fuera de DATA_DIR, restauración nueva verificada con hashes antes de copiar; originales conservados, ambiguas sin asignación.
+- [ ] Probar login/logout y reinicio con una sesión activa y otra revocada; archivos válidos y hashes conservados; temporales no servibles y eliminados. La recuperación operativa empieza con sesiones nuevas, sin revivir registros obsoletos.
+- [ ] Probar en el entorno nuevo subida/descarga de un reel reproducible, límites exactos/+1 byte, 429 y reintento manual; vigilar memoria, disco y salud. Registrar métricas y capacidad disponible del VPS nuevo sin cargas sobre producción.
+- [ ] Backup externo protegido del staging y restauración a volumen nuevo ensayados; presupuesto de disco para originales + temporales + snapshot + restauración + copia. Cero recolección o migración de fotografías reales en esta fase.
+- [ ] Sin auto-deploy de rama/PR, sin fusión y sin operación de producción. Obtener autorización expresa para crear infraestructura real antes de aplicar esta preparación.

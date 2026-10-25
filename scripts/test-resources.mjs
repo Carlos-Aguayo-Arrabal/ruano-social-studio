@@ -34,8 +34,8 @@ function body(bytes,video=false){return Readable.from((async function*(){let sen
 async function upload(path,bytes,video=false){const start=performance.now();return new Promise(resolve=>{
  let done=false;const source=body(bytes,video),finish=value=>{if(done)return;done=true;source.destroy();resolve({...value,ms:Math.round(performance.now()-start)});};
  const out=httpRequest({hostname:'127.0.0.1',port:3000,path,method:'PUT',headers},r=>{
-  // Early 413/429 must stop generation; fetch/undici kept generating rejected
-  // synthetic bodies at high concurrency and exhausted the CLIENT cgroup.
+  // Stop generation on early 413/429. The previous fetch-based load client
+  // exited 137 at high concurrency while the application remained alive.
   source.unpipe(out);source.destroy();if(!out.writableEnded)out.end();
   r.resume();r.on('end',()=>finish({status:r.statusCode}));r.on('error',e=>finish({status:r.statusCode,networkError:e.code||e.name}));
  });

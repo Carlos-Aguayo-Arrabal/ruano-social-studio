@@ -79,3 +79,13 @@ versión rechaza cookies antiguas y exige nuevo login. Sesiones revocables en
 [Informe, pruebas y límites](docs/security/phase-02.md) y
 [matriz administrativa/propuesta pendiente](docs/security/authorization-proposal.md).
 No restaurar sesiones antiguas para recuperar accesos después de un backup.
+
+### Preparación de staging · fase 0.3
+
+[Informe y evidencias de consumo de memoria](docs/security/phase-03.md):
+streaming de medios, controles de temporales y ensayo Docker con 256 MiB sin swap.
+[Preparación reproducible y checklist](docs/security/staging-checklist.md):
+`node scripts/prepare-staging.mjs /tmp/directorio-nuevo` genera únicamente archivos
+locales con datos sintéticos. Staging requiere **una réplica**; el diagnóstico de
+sesiones demuestra que varias instancias todavía no están soportadas.
+No se ha desplegado en Hostinger ni se autoriza producción.
