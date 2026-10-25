@@ -1,0 +1,58 @@
+# PROPUESTA: se activa solo tras revisión y merge independiente a main.
+# Nunca fusiona PR, publica paquetes ni despliega.
+name: Momentun - preparar siguiente prompt
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+permissions:
+  contents: read
+concurrency:
+  group: momentun-review-${{ github.repository }}
+  cancel-in-progress: true
+jobs:
+  prepare-next:
+    if: >-
+      vars.MOMENTUN_CODEX_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Comprobar habilitación y secreto
+        id: guard
+        env:
+          CODEX_SECRET_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
+        run: |
+          if [ "$CODEX_SECRET_PRESENT" != "true" ]; then
+            echo "::error::Falta OPENAI_API_KEY. No se ha llamado al modelo."
+            exit 1
+          fi
+      - name: Analizar y redactar el próximo encargo, sin modificar archivos
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":read-only"
+          output-file: /tmp/next-prompt.txt
+          prompt: |
+            Eres un revisor del proyecto Social Studio. Solo analiza el código y el estado
+            visible en checkout. No asumas que esta ejecución corresponde a un deploy.
+            Prioridad prevista: 0.5: preparar staging sintético sin desplegar; pruebas prolongadas, memoria RSS, copias y checklist.
+            Escribe un informe breve con riesgos verificables y el siguiente PROMPT
+            propuesto para Codex, sujeto a revisión humana. Si falta evidencia,
+            indica explícitamente que no se puede pasar de fase.
+            Nunca solicites acceso a datos reales, secretos, merges, despliegues,
+            cambios de main, servicios de pago ni modificaciones del VPS.
+      - name: Guardar propuesta como artefacto
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: momentun-next-prompt
+          path: /tmp/next-prompt.txt
+          if-no-files-found: error
+          retention-days: 7
