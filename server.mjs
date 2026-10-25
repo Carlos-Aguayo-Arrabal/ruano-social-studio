@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { receiveBinary, streamBinary, cleanInterruptedUploads } from './lib/binary-transfer.mjs';
+const sendStoredFile = (res, path, headers) => streamBinary(res, path, securityHeaders(headers));
 import { SessionStore } from './lib/sessions.mjs';
 import { resourceId, parseCookies, normalizeContent, trustedMutation } from './lib/security.mjs';
 import crypto from 'node:crypto';
@@ -38,6 +40,7 @@ const photoDir = (brand, ref) => {
   return join(scopedPhotosDir, brand, String(ref));
 };
 await mkdir(scopedPhotosDir, { recursive: true });
+await cleanInterruptedUploads(scopedPhotosDir);
 await mkdir(photosDir, { recursive: true });
 
 // Copia de seguridad del estado en cada arranque; se guardan las 10 últimas
@@ -684,20 +687,18 @@ async function handleApi(req, res, url, user) {
   if (!m[2]) {
     if (req.method === 'GET') return sendJson(res, 200, await readManifest(photoBrand, ref));
     if (req.method === 'POST') {
-      const body = await readRaw(req, MAX_PHOTO_BYTES);
-      // Se guardan en WebP (ocupa menos); JPG como alternativa para navegadores sin WebP
-      const isWebp = body.length > 12 && body.toString('ascii', 0, 4) === 'RIFF' && body.toString('ascii', 8, 12) === 'WEBP';
-      const isJpg = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
-      if (!isWebp && !isJpg) return sendJson(res, 400, { error: 'Solo se admiten fotos WebP o JPG' });
+      await readManifest(photoBrand, ref);
+      const upload = await receiveBinary(req, dir, { maxBytes: MAX_PHOTO_BYTES, kind: 'photo' });
       const id = crypto.randomBytes(12).toString('hex');
-      await mkdir(dir, { recursive: true });
-      await withLock(photoLock, async () => {
-        const manifest = await readManifest(photoBrand, ref);
-        await writeFile(join(dir, `${id}.${isWebp ? 'webp' : 'jpg'}`), body);
-        manifest.photos.push({ id, adjust: null });
-        await writeManifest(photoBrand, ref, manifest);
-      });
-      return sendJson(res, 201, { id, bytes: body.length });
+      try {
+        await withLock(photoLock, async () => {
+          const manifest = await readManifest(photoBrand, ref);
+          await rename(upload.path, join(dir, `${id}.${upload.ext}`));
+          manifest.photos.push({ id, adjust: null });
+          await writeManifest(photoBrand, ref, manifest);
+        });
+      } finally { await upload.cleanup(); }
+      return sendJson(res, 201, { id, bytes: upload.bytes });
     }
     if (req.method === 'PUT') {
       // Orden y ajustes; solo se aceptan fotos que ya existen
@@ -720,12 +721,10 @@ async function handleApi(req, res, url, user) {
   if (m[2] === 'cover') {
     if (req.method === 'GET') return sendCover(res, photoBrand, ref, 'no-store', url.searchParams.has('raw'));
     if (req.method === 'PUT') {
-      const body = await readRaw(req, MAX_PHOTO_BYTES);
-      const isJpg = body.length > 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
-      if (!isJpg) return sendJson(res, 400, { error: 'La portada debe ser JPG' });
-      await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, 'cover.jpg'), body);
-      return sendJson(res, 200, { ok: true, bytes: body.length });
+      const upload = await receiveBinary(req, dir, { maxBytes: MAX_PHOTO_BYTES, kind: 'jpg' });
+      try { await rename(upload.path, join(dir, 'cover.jpg')); }
+      finally { await upload.cleanup(); }
+      return sendJson(res, 200, { ok: true, bytes: upload.bytes });
     }
     return sendJson(res, 405, { error: 'Método no permitido' });
   }
@@ -735,12 +734,7 @@ async function handleApi(req, res, url, user) {
   if (!(await readManifest(photoBrand, ref)).photos.some(p => p.id === id)) return sendJson(res, 404, { error: 'Foto no encontrada' });
   if (req.method === 'GET') {
     for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
-      try {
-        return send(res, 200, await readFile(join(dir, `${id}.${ext}`)), {
-          'Content-Type': type,
-          'Cache-Control': 'no-store',
-        });
-      } catch {}
+      if (await sendStoredFile(res, join(dir, `${id}.${ext}`), { 'Content-Type': type, 'Cache-Control': 'no-store' })) return;
     }
     return sendJson(res, 404, { error: 'Foto no encontrada' });
   }
@@ -763,11 +757,11 @@ async function sendCover(res, brand, ref, cache, raw = false) {
   if (!manifest.photos?.length) return sendJson(res, 404, { error: 'Sin foto' });
   const dir = photoDir(brand, ref);
   // raw: la primera foto tal cual (miniatura de la ficha del inmueble), sin el diseño de portada
-  if (!raw) try { return send(res, 200, await readFile(join(dir, 'cover.jpg')), { 'Content-Type': 'image/jpeg', 'Cache-Control': cache }); } catch {}
+  if (!raw && await sendStoredFile(res, join(dir, 'cover.jpg'), { 'Content-Type': 'image/jpeg', 'Cache-Control': cache })) return;
   const ph = manifest.photos[0];
   if (safeId(ph.id)) {
     for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
-      try { return send(res, 200, await readFile(join(dir, `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': cache }); } catch {}
+      if (await sendStoredFile(res, join(dir, `${ph.id}.${ext}`), { 'Content-Type': type, 'Cache-Control': cache })) return;
     }
   }
   return sendJson(res, 404, { error: 'Sin foto' });
@@ -1085,7 +1079,7 @@ async function handleWeb(req, res, url) {
   const ph = (await readManifest(data.brand.id, ref)).photos?.[Number(m[4])];
   if (!ph || !safeId(ph.id)) return send(res, 404, 'Sin foto', { 'Content-Type': 'text/plain; charset=utf-8' });
   for (const [ext, type] of [['webp', 'image/webp'], ['jpg', 'image/jpeg']]) {
-    try { return send(res, 200, await readFile(join(photoDir(data.brand.id, ref), `${ph.id}.${ext}`)), { 'Content-Type': type, 'Cache-Control': 'public, max-age=600' }); } catch {}
+    if (await sendStoredFile(res, join(photoDir(data.brand.id, ref), `${ph.id}.${ext}`), { 'Content-Type': type, 'Cache-Control': 'public, max-age=600' })) return;
   }
   return send(res, 404, 'Sin foto', { 'Content-Type': 'text/plain; charset=utf-8' });
 }
@@ -1478,6 +1472,7 @@ const metaConfigured = () => !!(process.env.META_APP_ID && process.env.META_APP_
 const META_SCOPES = 'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,business_management';
 const metaDir = join(dataDir, 'meta'), mediaDir = join(dataDir, 'media');
 await mkdir(metaDir, { recursive: true }); await mkdir(mediaDir, { recursive: true });
+await cleanInterruptedUploads(mediaDir);
 const safeKey = k => (/^[A-Za-z0-9_-]{1,40}$/.test(String(k || '')) ? String(k) : null);
 async function readMeta(brandId) { try { return JSON.parse(await readFile(join(metaDir, `${brandId}.json`), 'utf8')); } catch { return null; } }
 const writeMeta = (brandId, m) => writeAtomic(join(metaDir, `${brandId}.json`), JSON.stringify(m));
@@ -1503,8 +1498,8 @@ async function handlePublicMedia(req, res, url) {
   const m = url.pathname.match(/^\/m\/([A-Za-z0-9_-]{1,40})\/([A-Za-z0-9_-]{1,40})\/(\d{1,2}\.(?:jpg|mp4))$/);
   const exp = Number(url.searchParams.get('e'));
   if (!m || !(exp > Date.now()) || !safeEqual(url.searchParams.get('s') || '', mediaSig(m[1], m[2], m[3], exp))) return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain' });
-  try { return send(res, 200, await readFile(join(mediaDir, m[1], m[2], m[3])), { 'Content-Type': m[3].endsWith('.mp4') ? 'video/mp4' : 'image/jpeg', 'Cache-Control': 'private, max-age=600' }); }
-  catch { return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain' }); }
+  if (await sendStoredFile(res, join(mediaDir, m[1], m[2], m[3]), { 'Content-Type': m[3].endsWith('.mp4') ? 'video/mp4' : 'image/jpeg', 'Cache-Control': 'private, max-age=600' })) return;
+  return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain' });
 }
 // Hora de Madrid → instante real (tiene en cuenta el horario de verano)
 function madridToMs(date, time) {
@@ -1676,19 +1671,24 @@ async function handleMeta(req, res, url, user) {
     const [, brandId, key, file] = mm;
     if (!canBrand(user, brandId)) return deny();
     const dir = join(mediaDir, brandId, key);
-    if (file && req.method === 'GET') { try { return send(res, 200, await readFile(join(dir, file)), { 'Content-Type': file.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg', 'Cache-Control': 'private, max-age=60' }); } catch { return sendJson(res, 404, { error: 'No encontrado' }); } }
+    if (file && req.method === 'GET') {
+      if (await sendStoredFile(res, join(dir, file), { 'Content-Type': file.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg', 'Cache-Control': 'private, max-age=60' })) return;
+      return sendJson(res, 404, { error: 'No encontrado' });
+    }
     if (!file && req.method === 'GET') return sendJson(res, 200, (await mediaList(brandId, key)).map(m => ({ ...m, url: `/api/media/${brandId}/${key}/${m.file}` })));
     if (!file && req.method === 'DELETE') { await rm(dir, { recursive: true, force: true }); return sendJson(res, 200, { ok: true }); }
     if (!file && req.method === 'PUT') {
       const i = Number(url.searchParams.get('i')), video = url.searchParams.get('type') === 'video';
       if (!(i >= 0 && i < 20)) return sendJson(res, 400, { error: 'Posición no válida' });
-      const body = await readRaw(req, video ? 120 * 1024 * 1024 : 8 * 1024 * 1024);
-      const isJpg = body[0] === 0xff && body[1] === 0xd8, isMp4 = body.toString('ascii', 4, 8) === 'ftyp';
-      if (video ? !isMp4 : !isJpg) return sendJson(res, 400, { error: video ? 'El vídeo debe ser MP4' : 'La imagen debe ser JPG' });
-      await mkdir(dir, { recursive: true });
-      for (const old of await mediaList(brandId, key)) if (parseInt(old.file) === i) await unlink(join(dir, old.file)).catch(() => {});
-      await writeFile(join(dir, `${i}.${video ? 'mp4' : 'jpg'}`), body);
-      return sendJson(res, 200, { ok: true, bytes: body.length });
+      const upload = await receiveBinary(req, dir, { maxBytes: video ? 120 * 1024 * 1024 : 8 * 1024 * 1024, kind: video ? 'mp4' : 'jpg' });
+      try {
+        await withLock(`media:${brandId}:${key}`, async () => {
+          const file = `${i}.${upload.ext}`;
+          await rename(upload.path, join(dir, file));
+          for (const old of await mediaList(brandId, key)) if (parseInt(old.file) === i && old.file !== file) await unlink(join(dir, old.file)).catch(() => {});
+        });
+      } finally { await upload.cleanup(); }
+      return sendJson(res, 200, { ok: true, bytes: upload.bytes });
     }
     return sendJson(res, 405, { error: 'Método no permitido' });
   }

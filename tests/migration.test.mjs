@@ -50,6 +50,7 @@ test('legacy collisions and orphans are unresolved, never guessed or copied', as
     await mkdir(join(f.dir, 'photos', '999')); await writeFile(join(f.dir, 'photos', '999', 'ffffffffffffffffffffffff.jpg'), photo);
     const before = await inventory(join(f.dir, 'photos')), plan = { ...await planPhotos(f.dir), ownershipVerified: true };
     assert.equal(plan.assignments.length, 0); assert.equal(plan.unresolved.length, 2);
+    await assert.rejects(migratePhotos(f.dir, backup, {...plan,assignments:[{brandId:'a',propertyId:'101'}]}, {offline:true}),/Ambiguous/);
     const result = await migratePhotos(f.dir, backup, plan, { offline: true });
     assert.equal(result.copied.length, 0); assert.deepEqual(await inventory(join(f.dir, 'photos')), before);
     assert.deepEqual(await inventory(join(f.dir, 'photos-v2')), {});

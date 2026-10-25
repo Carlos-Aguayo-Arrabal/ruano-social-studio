@@ -22,13 +22,17 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run check
       - run: npm test
+      - name: Verify and record single-replica constraint
+        run: node scripts/probe-replicas.mjs
       - name: Dependency audit (all severities block)
         run: npm audit --json > npm-audit.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: dependency-audit-node-${{ matrix.node }}
-          path: npm-audit.json
+          path: |
+            npm-audit.json
+            artifacts/replica-results.json
 
   docker:
     runs-on: ubuntu-latest

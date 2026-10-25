@@ -11,6 +11,7 @@ services:
     tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
     cpus: 1
     mem_limit: 256m
+    memswap_limit: 256m
     pids_limit: 128
     restart: "no"
     environment:

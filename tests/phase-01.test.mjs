@@ -37,7 +37,7 @@ test('corrupt photo manifest returns 503 without overwriting existing photograph
 test('oversized photo is rejected without persisting it or terminating the server',async()=>{
  const f=await fixture();try{
   const a=await f.login(),bytes=Buffer.alloc(4*1024*1024+1);photo.copy(bytes);
-  await assert.rejects(f.request('/api/photos/101?brand=a',a,{method:'POST',body:bytes}));
+  assert.equal((await f.request('/api/photos/101?brand=a',a,{method:'POST',body:bytes})).status,413);
   assert.deepEqual(await inventory(join(f.dir,'photos-v2')),{});assert.equal((await f.request('/health')).status,200);
  }finally{await f.close()}
 });

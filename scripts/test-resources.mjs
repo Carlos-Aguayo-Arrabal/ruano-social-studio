@@ -21,7 +21,7 @@ try{
  assert.equal(await run(['inspect','--format','{{.State.Health.Status}}',app]),'healthy');
  assert.equal(await run(['inspect','--format','{{.HostConfig.NetworkMode}}',app]),'none');
  const client=script=>run(['run','--rm','-i','--network','container:'+app,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--cpus','1','--pids-limit','64','--env-file',env,image,'node','--input-type=module'],script);
- const common=`import assert from 'node:assert/strict';import {Readable} from 'node:stream';import {performance} from 'node:perf_hooks';
+ const common=`import assert from 'node:assert/strict';import {Readable} from 'node:stream';import {performance} from 'node:perf_hooks';import {createHash} from 'node:crypto';
 const req=(p,o={})=>fetch('http://127.0.0.1:3000'+p,{redirect:'manual',signal:AbortSignal.timeout(90000),...o});
 const login=await req('/login',{method:'POST',body:new URLSearchParams({username:process.env.APP_USERNAME,password:process.env.APP_PASSWORD})});assert.equal(login.status,303);
 const cookie=login.headers.get('set-cookie').split(';')[0],headers={Cookie:cookie};
@@ -41,20 +41,32 @@ async function upload(path,bytes,video=false){const start=performance.now();try{
   const value=JSON.parse(await client(common+`console.log(JSON.stringify(await upload(${JSON.stringify(path)},${bytes},${video})));`));
   const observed=await state();const result={name,bytes,expected,...value,...observed,memory:await memory()};cases.push(result);console.log('::notice title=Resource case::'+JSON.stringify(result));
   assert.equal(observed.running,true,'Application terminated during '+name);assert.equal(observed.oomKilled,false,'OOM during '+name);
-  if(expected==='reject')assert.ok(value.status===null||[400,413,429].includes(value.status));else assert.equal(value.status,expected,name);
+  if(expected==='reject')assert.equal(value.status,413,name);else assert.equal(value.status,expected,name);
  }
  for(const concurrency of [4,8]){
   const result=JSON.parse(await client(common+`const start=performance.now();const results=await Promise.all(Array.from({length:${concurrency}},(_,i)=>upload('/api/media/capacity/concurrent-'+i+'?i=0',256*1024)));console.log(JSON.stringify({results,totalMs:Math.round(performance.now()-start)}));`));
   assert.ok(result.results.every(v=>[200,429].includes(v.status)));assert.ok(result.results.some(v=>v.status===200));const observed=await state();assert.equal(observed.running,true);assert.equal(observed.oomKilled,false);
   const item={name:'concurrent-256KiB-images',concurrency,...result,...observed,memory:await memory()};cases.push(item);console.log('::notice title=Resource concurrency::'+JSON.stringify(item));
  }
- const concurrentVideos=JSON.parse(await client(common+`const start=performance.now();const results=await Promise.all(Array.from({length:2},(_,i)=>upload('/api/media/capacity/large-'+i+'?i=0&type=video',120*1024*1024,true)));console.log(JSON.stringify({results,totalMs:Math.round(performance.now()-start)}));`));
- const videoState=await state(),videoCase={name:'concurrent-120MiB-videos',concurrency:2,...concurrentVideos,...videoState,memory:await memory()};cases.push(videoCase);console.log('::notice title=Resource videos::'+JSON.stringify(videoCase));
- assert.equal(videoState.running,true,'Application terminated during concurrent valid videos');assert.equal(videoState.oomKilled,false,'OOM during concurrent videos');assert.ok(concurrentVideos.results.every(r=>[200,429].includes(r.status)));
- report.disk=JSON.parse(await run(['exec','-i',app,'node','--input-type=module'],`import {readdir,stat} from 'node:fs/promises';import {join} from 'node:path';let bytes=0,files=0;async function walk(p){for(const f of await readdir(p)){const q=join(p,f),s=await stat(q);if(s.isDirectory())await walk(q);else{files++;bytes+=s.size;}}}await walk('/app/data');console.log(JSON.stringify({files,bytes}));`));
+ for(const concurrency of [1,2,4,8,16,32]){
+  const result=JSON.parse(await client(common+`const start=performance.now();const pending=Promise.all(Array.from({length:${concurrency}},(_,i)=>upload('/api/media/capacity/large-'+i+'?i=0&type=video',120*1024*1024,true)));const health=await req('/health');await health.text();const results=await pending;console.log(JSON.stringify({results,healthStatus:health.status,totalMs:Math.round(performance.now()-start)}));`));
+  const observed=await state(),item={name:'concurrent-120MiB-videos',concurrency,...result,...observed,memory:await memory()};cases.push(item);console.log('::notice title=Resource videos::'+JSON.stringify(item));
+  assert.equal(observed.running,true,'Application terminated during concurrent valid videos');assert.equal(observed.oomKilled,false,'OOM during concurrent videos');assert.equal(result.healthStatus,200);assert.ok(result.results.every(r=>[200,429].includes(r.status)));assert.ok(result.results.some(r=>r.status===200));
+ }
+ const download=JSON.parse(await client(common+`const start=performance.now();const results=await Promise.all(Array.from({length:4},async()=>{const r=await req('/api/media/capacity/video/0.mp4',{headers});let bytes=0;const hash=createHash('sha256');for await(const chunk of r.body){bytes+=chunk.length;hash.update(chunk);}return {status:r.status,bytes,sha256:hash.digest('hex')};}));console.log(JSON.stringify({results,totalMs:Math.round(performance.now()-start)}));`));
+ const downloadCase={name:'concurrent-120MiB-downloads',concurrency:4,...download,...await state(),memory:await memory()};cases.push(downloadCase);console.log('::notice title=Resource downloads::'+JSON.stringify(downloadCase));
+ assert.ok(download.results.every(r=>r.status===200&&r.bytes===120*MiB));assert.equal(downloadCase.running,true);assert.equal(downloadCase.oomKilled,false);
+ await run(['restart',app]);
+ for(let i=0;i<40;i++){if(await run(['inspect','--format','{{.State.Health.Status}}',app])==='healthy')break;await new Promise(r=>setTimeout(r,500));}
+ assert.equal(await run(['inspect','--format','{{.State.Health.Status}}',app]),'healthy');
+ const afterRestart=JSON.parse(await client(common+`const r=await req('/api/media/capacity/video/0.mp4',{headers});let bytes=0,header;const hash=createHash('sha256');for await(const chunk of r.body){if(!header)header=Buffer.from(chunk).subarray(4,8).toString();bytes+=chunk.length;hash.update(chunk);}assert.equal(r.status,200);assert.equal(bytes,120*1024*1024);assert.equal(header,'ftyp');console.log(JSON.stringify({status:r.status,bytes,header,sha256:hash.digest('hex')}));`));
+ assert.ok(download.results.every(r=>r.sha256===afterRestart.sha256),'Video checksum changed across restart');
+ report.restart={healthy:true,...afterRestart,...await state()};
+ report.disk=JSON.parse(await run(['exec','-i',app,'node','--input-type=module'],`import {readdir,stat} from 'node:fs/promises';import {join} from 'node:path';let bytes=0,files=0,partials=0;async function walk(p){for(const f of await readdir(p)){const q=join(p,f),s=await stat(q);if(s.isDirectory())await walk(q);else{files++;bytes+=s.size;if(/^\\.upload-/.test(f))partials++;}}}await walk('/app/data');console.log(JSON.stringify({files,bytes,partials}));`));
+ assert.equal(report.disk.partials,0);
  report.success=true;
 }catch(err){report.success=false;report.failure=err.message;if(madeApp)report.finalState=await state();process.exitCode=1;console.error('Resource validation failed:',err.message);}
 finally{
- await mkdir('artifacts',{recursive:true});await writeFile('artifacts/resource-results.json',JSON.stringify(report,null,2));console.log('::notice title=Resource summary::'+JSON.stringify({success:report.success,caseCount:cases.length,memoryLimitBytes:report.memoryLimitBytes,disk:report.disk,finalState:report.finalState}));
+ await mkdir('artifacts',{recursive:true});await writeFile('artifacts/resource-results.json',JSON.stringify(report,null,2));console.log('::notice title=Resource summary::'+JSON.stringify({success:report.success,caseCount:cases.length,memoryLimitBytes:report.memoryLimitBytes,disk:report.disk,restart:report.restart,finalState:report.finalState}));
  if(madeApp)await run(['rm','-f',app]);if(madeVolume)await run(['volume','rm',volume]);await rm(tmp,{recursive:true,force:true});
 }
