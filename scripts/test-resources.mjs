@@ -12,7 +12,7 @@ const run=(args,input='')=>new Promise((resolve,reject)=>{const p=spawn('docker'
 let madeApp=false,madeVolume=false;
 const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',clientMemoryBytes:512*1024*1024,productionData:false,cases};
 const state=async()=>{const [running,oomKilled,exitCode]=(await run(['inspect','--format','{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}}',app])).split(' ');return {running:running==='true',oomKilled:oomKilled==='true',exitCode:Number(exitCode)};};
-async function memory(){try{const values=await run(['exec',app,'sh','-c',"for f in memory.current memory.peak memory.swap.current memory.swap.max; do cat /sys/fs/cgroup/$f; done; awk '/^anon /{print $2}' /sys/fs/cgroup/memory.stat; awk '/^VmRSS:/{print $2*1024}' /proc/1/status"]);const [currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,anonBytes,rssBytes]=values.split(/\s+/).map(Number);return {currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,anonBytes,rssBytes,includesFileCache:true};}catch{return null}}
+async function memory(){try{const values=await run(['exec',app,'sh','-c',"for f in memory.current memory.peak memory.swap.current memory.swap.max memory.max; do cat /sys/fs/cgroup/$f; done; awk '/^anon /{print $2}' /sys/fs/cgroup/memory.stat; awk '/^VmRSS:/{print $2*1024}' /proc/1/status"]);const [currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,configuredLimitBytes,anonBytes,rssBytes]=values.split(/\s+/).map(Number);return {currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,configuredLimitBytes,anonBytes,rssBytes,includesFileCache:true};}catch{return null}}
 try{
  const env=join(tmp,'synthetic.env');await writeFile(env,['APP_USERNAME=capacity-owner','APP_PASSWORD='+randomBytes(24).toString('hex'),'APP_SESSION_SECRET='+randomBytes(48).toString('hex'),'OLLAMA_URL=http://127.0.0.1:1'].join('\n'),{mode:0o600});
  await run(['volume','create',volume]);madeVolume=true;
@@ -42,7 +42,7 @@ async function upload(path,bytes,video=false){const start=performance.now();retu
  out.setTimeout(90000,()=>out.destroy(Error('synthetic client timeout')));out.on('error',e=>finish({status:null,networkError:e.code||e.name}));source.on('error',e=>out.destroy(e));source.pipe(out);
 });}`;
  await client(common+`const r=await req('/api/sync',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({brands:{upsert:[{id:'capacity',name:'Synthetic capacity'}]},data:{capacity:{properties:{upsert:[{id:101,title:'Synthetic'}]}}}})});assert.equal(r.status,200);`);
- report.baselineMemory=await memory();assert.equal(report.baselineMemory?.swapMaxBytes,0,"Swap must be disabled for capacity validation");
+ report.baselineMemory=await memory();assert.equal(report.baselineMemory?.configuredLimitBytes,256*1024*1024,"The actual app cgroup must be limited to 256 MiB");assert.equal(report.baselineMemory?.swapMaxBytes,0,"Swap must be disabled for capacity validation");
  const MiB=1024*1024;
  for(const [name,path,bytes,video,expected] of [
   ['photo-exact-4MiB','/api/photos/101/cover?brand=capacity',4*MiB,false,200],
