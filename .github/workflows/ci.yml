@@ -36,19 +36,26 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Build production-dependency image (no registry publication)
-        run: docker build -t ruano-staging-check .
+        run: |
+          docker pull node:22-alpine
+          ruano_stage_base=$(docker image inspect --format '{{index .RepoDigests 0}}' node:22-alpine)
+          docker build --build-arg "NODE_IMAGE=$ruano_stage_base" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t ruano-staging-check .
+          printf 'RUANO_BASE_REF=%s\n' "$ruano_stage_base" >> "$GITHUB_ENV"
       - name: Isolated startup, health, permissions and restart tests
         run: node scripts/test-docker.mjs ruano-staging-check
       - name: Bounded synthetic file and concurrency resource tests
         run: node scripts/test-resources.mjs ruano-staging-check
-      - name: Sustained synthetic stability and interrupted-restart tests (3 minutes)
+      - name: Synthetic stability, disk growth and offline recovery (extended on marked push)
+        env:
+          SOAK_PHASE_SECONDS: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[staging-long]') && '300' || '60' }}
+          SOAK_IDLE_SECONDS: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[staging-long]') && '120' || '0' }}
         run: node scripts/test-soak.mjs ruano-staging-check
       - uses: actions/upload-artifact@v4
         if: always()
