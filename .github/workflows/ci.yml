@@ -73,7 +73,7 @@ jobs:
       actions: read
     strategy:
       matrix:
-        run_id: [40217906593]
+        run_id: [40217906593, 40217901995]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -85,8 +85,18 @@ jobs:
           path: replayed
           run-id: ${{ matrix.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Read only public image provenance from the synthetic run logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPLAY_RUN_ID: ${{ matrix.run_id }}
+        run: |
+          ruano_docker_job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REPLAY_RUN_ID/jobs" --jq '.jobs[]|select(.name=="docker")|.id')
+          gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$ruano_docker_job/logs" > replayed/docker.log
+          python scripts/read-build-provenance.py replayed/docker.log "$REPLAY_RUN_ID"
       - run: node scripts/analyze-soak-report.mjs replayed/soak-results.json
       - uses: actions/upload-artifact@v4
         with:
           name: diagnostic-analysis-${{ matrix.run_id }}
-          path: artifacts/replayed-soak-analysis.json
+          path: |
+            artifacts/replayed-soak-analysis.json
+            artifacts/replayed-build-provenance.json
