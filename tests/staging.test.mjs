@@ -16,7 +16,7 @@ test('staging generator creates independent private synthetic settings and canno
   const a=await prepareStaging(join(tmp,'one')),b=await prepareStaging(join(tmp,'two'));assert.notEqual(a.project,b.project);assert.notEqual(a.volume,b.volume);
   const first=await readFile(join(a.output,'synthetic.env'),'utf8'),second=await readFile(join(b.output,'synthetic.env'),'utf8');assert.notEqual(first,second);assert.equal((await stat(join(a.output,'synthetic.env'))).mode&0o777,0o600);
   const compose=await readFile(join(a.output,'compose.yml'),'utf8');assert.match(compose,/network_mode: none/);assert.doesNotMatch(compose,/ports:|external: true/);
-  const plan=JSON.parse(await readFile(join(a.output,'easypanel-plan.json')));assert.equal(plan.replicas,1);assert.equal(plan.autoDeploy,false);assert.equal(plan.domain.dnsConfigured,false);
+  const plan=JSON.parse(await readFile(join(a.output,'easypanel-plan.json')));assert.equal(plan.replicas,1);assert.equal(plan.updates.order,'stop-first');assert.equal(plan.resources.memoryBytes,268435456);assert.equal(plan.resources.swap,false);assert.equal(plan.resources.uploadConcurrency.perUser,2);assert.equal(plan.recovery.externalRestoreVerified,false);assert.equal(plan.autoDeploy,false);assert.equal(plan.domain.dnsConfigured,false);
   await assert.rejects(prepareStaging(a.output));assert.equal(await readFile(join(a.output,'synthetic.env'),'utf8'),first);
  }finally{await rm(tmp,{recursive:true,force:true})}
 });

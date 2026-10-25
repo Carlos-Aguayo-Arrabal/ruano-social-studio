@@ -48,6 +48,8 @@ jobs:
         run: node scripts/test-docker.mjs ruano-staging-check
       - name: Bounded synthetic file and concurrency resource tests
         run: node scripts/test-resources.mjs ruano-staging-check
+      - name: Sustained synthetic stability and interrupted-restart tests (3 minutes)
+        run: node scripts/test-soak.mjs ruano-staging-check
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -23,13 +23,18 @@ services:
     memswap_limit: 256m
     pids_limit: 128
     restart: "no"
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        order: stop-first
     env_file: [./synthetic.env]
     volumes: [synthetic-data:/app/data]
 volumes:
   synthetic-data:
     name: ${volume}
 `,{flag:'wx'});
-  const plan={schema:'manual-reference-not-easypanel-api',project,volume:{name:volume,mount:'/app/data',external:false,uid:1000,gid:1000},replicas:1,image:'ruano-staging-check',internalPort:3000,publishedHostPorts:[],domain:{hostname:domain,dnsConfigured:false,tls:'pending-real-staging-validation'},credentials:'synthetic.env (private; do not commit or print)',autoDeploy:false,networks:{isolatedRehearsal:'none',futureProxy:'new staging-only network after authorization; never production networks'},perimeterPaths:['/','/login','/api/*','/w/*','/r/*','/m/*','/health','/vendor/*']};
+  const plan={schema:'manual-reference-not-easypanel-api',project,volume:{name:volume,mount:'/app/data',external:false,uid:1000,gid:1000},replicas:1,updates:{automatic:false,order:'stop-first',parallelism:1},resources:{cpus:1,memoryBytes:268435456,swap:false,pids:128,uploadConcurrency:{global:4,perUser:2,perTenant:3}},recovery:{offline:true,newBackupAndRestoreTargets:true,externalRestoreVerified:false,newSessionsAfterRestore:true},image:'ruano-staging-check',internalPort:3000,publishedHostPorts:[],domain:{hostname:domain,dnsConfigured:false,tls:'pending-real-staging-validation'},credentials:'synthetic.env (private; do not commit or print)',autoDeploy:false,networks:{isolatedRehearsal:'none',futureProxy:'new staging-only network after authorization; never production networks'},perimeterPaths:['/','/login','/api/*','/w/*','/r/*','/m/*','/health','/vendor/*']};
   await writeFile(join(dir,'easypanel-plan.json'),JSON.stringify(plan,null,2),{flag:'wx'});return {output:dir,project,volume:volume,files:['synthetic.env','compose.yml','easypanel-plan.json'],infrastructureCreated:false};
  }catch(err){await rm(dir,{recursive:true,force:true});throw err;}
 }

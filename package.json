@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node scripts/check-frontend.mjs",
+    "check": "node --check server.mjs && node --check lib/upload-client.js && node scripts/check-frontend.mjs",
     "test": "node --test tests/*.test.mjs"
   },
   "engines": {

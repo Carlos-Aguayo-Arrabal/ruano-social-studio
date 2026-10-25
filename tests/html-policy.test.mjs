@@ -14,5 +14,5 @@ test('H03: dynamic HTML sinks must pass directly through DOMPurify',async()=>{
   }
   for(const v of Object.values(n))if(Array.isArray(v))v.forEach(visit);else if(v&&typeof v==='object')visit(v);
  }
- visit(parse(source,{ecmaVersion:'latest'}));assert.equal(sanitized,1,'Keep one auditable sanitizer boundary');
+ visit(parse(source,{ecmaVersion:'latest'}));visit(parse(await readFile(new URL('../lib/upload-client.js',import.meta.url),'utf8'),{ecmaVersion:'latest'}));assert.equal(sanitized,1,'Keep one auditable sanitizer boundary');
 });

@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { receiveBinary, streamBinary, cleanInterruptedUploads } from './lib/binary-transfer.mjs';
+import { receiveBinary, streamBinary, cleanInterruptedUploads, hashBinary } from './lib/binary-transfer.mjs';
 const sendStoredFile = (res, path, headers) => streamBinary(res, path, securityHeaders(headers));
 import { SessionStore } from './lib/sessions.mjs';
 import { resourceId, parseCookies, normalizeContent, trustedMutation } from './lib/security.mjs';
@@ -24,6 +24,7 @@ if (!username || !password || !sessionSecret) {
 
 const indexHtml = await readFile(join(__dirname, 'index.html'));
 // Librería para montar el MP4 del reel en el navegador (se sirve desde aquí, sin depender de un CDN)
+const uploadClientJs = await readFile(join(__dirname, 'lib', 'upload-client.js'));
 const purifyJs = await readFile(join(__dirname, 'node_modules', 'dompurify', 'dist', 'purify.min.js'));
 const mp4MuxerJs = await readFile(join(__dirname, 'node_modules', 'mp4-muxer', 'build', 'mp4-muxer.mjs')).catch(() => null);
 // Logo oficial de Ruano (va incrustado en index.html); se usa en la revisión si la marca no tiene otro
@@ -476,7 +477,7 @@ function send(res, status, body, headers = {}) {
 }
 
 function sendJson(res, status, data) {
-  send(res, status, JSON.stringify(data), { 'Content-Type': 'application/json; charset=utf-8' });
+  send(res, status, JSON.stringify(data), { 'Content-Type': 'application/json; charset=utf-8', ...(status===429?{'Retry-After':'2'}:{}) });
 }
 
 async function handleApi(req, res, url, user) {
@@ -688,11 +689,18 @@ async function handleApi(req, res, url, user) {
     if (req.method === 'GET') return sendJson(res, 200, await readManifest(photoBrand, ref));
     if (req.method === 'POST') {
       await readManifest(photoBrand, ref);
-      const upload = await receiveBinary(req, dir, { maxBytes: MAX_PHOTO_BYTES, kind: 'photo' });
-      const id = crypto.randomBytes(12).toString('hex');
+      const key=req.headers['idempotency-key'];
+      if(key!==undefined && !/^[a-f0-9]{32}$/.test(key))return sendJson(res,400,{error:'Identificador de subida no válido'});
+      const id=key?crypto.createHmac('sha256',sessionSecret).update(JSON.stringify(['photo',user.id,photoBrand,ref,key])).digest('hex').slice(0,24):crypto.randomBytes(12).toString('hex');
+      const upload = await receiveBinary(req, dir, { maxBytes: MAX_PHOTO_BYTES, kind: 'photo',userId:user.id,tenantId:photoBrand });
       try {
         await withLock(photoLock, async () => {
           const manifest = await readManifest(photoBrand, ref);
+          if(key && manifest.photos.some(p=>p.id===id)){
+            let digest;try{digest=await hashBinary(join(dir,`${id}.${upload.ext}`));}catch(e){if(e.code!=='ENOENT')throw e;}
+            if(digest!==upload.sha256)throw Object.assign(new Error('Este identificador de subida ya se utilizó con otro archivo o el original no está disponible'),{status:409});
+            return;
+          }
           await rename(upload.path, join(dir, `${id}.${upload.ext}`));
           manifest.photos.push({ id, adjust: null });
           await writeManifest(photoBrand, ref, manifest);
@@ -721,7 +729,7 @@ async function handleApi(req, res, url, user) {
   if (m[2] === 'cover') {
     if (req.method === 'GET') return sendCover(res, photoBrand, ref, 'no-store', url.searchParams.has('raw'));
     if (req.method === 'PUT') {
-      const upload = await receiveBinary(req, dir, { maxBytes: MAX_PHOTO_BYTES, kind: 'jpg' });
+      const upload = await receiveBinary(req, dir, { maxBytes: MAX_PHOTO_BYTES, kind: 'jpg',userId:user.id,tenantId:photoBrand });
       try { await rename(upload.path, join(dir, 'cover.jpg')); }
       finally { await upload.cleanup(); }
       return sendJson(res, 200, { ok: true, bytes: upload.bytes });
@@ -1680,7 +1688,7 @@ async function handleMeta(req, res, url, user) {
     if (!file && req.method === 'PUT') {
       const i = Number(url.searchParams.get('i')), video = url.searchParams.get('type') === 'video';
       if (!(i >= 0 && i < 20)) return sendJson(res, 400, { error: 'Posición no válida' });
-      const upload = await receiveBinary(req, dir, { maxBytes: video ? 120 * 1024 * 1024 : 8 * 1024 * 1024, kind: video ? 'mp4' : 'jpg' });
+      const upload = await receiveBinary(req, dir, { maxBytes: video ? 120 * 1024 * 1024 : 8 * 1024 * 1024, kind: video ? 'mp4' : 'jpg',userId:user.id,tenantId:brandId });
       try {
         await withLock(`media:${brandId}:${key}`, async () => {
           const file = `${i}.${upload.ext}`;
@@ -1773,6 +1781,7 @@ async function handleRequest(req, res) {
     return sendJson(res, 403, { error: 'Origen de la petición no permitido' });
   }
 
+  if (url.pathname === '/vendor/uploads.js' && req.method === 'GET') return send(res,200,uploadClientJs,{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-store'});
   if (url.pathname === '/vendor/purify.min.js') return send(res, 200, purifyJs, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
 
   if (url.pathname === '/vendor/mp4-muxer.mjs' && mp4MuxerJs) {

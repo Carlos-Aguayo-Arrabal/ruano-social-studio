@@ -308,6 +308,7 @@
 
   <div class="toast" id="toast"></div>
   <script src="/vendor/purify.min.js"></script>
+  <script src="/vendor/uploads.js"></script>
   <script>
 // All dynamic HTML passes through the pinned, locally served sanitizer.
 // Fail closed if it is unavailable; do not fall back to raw HTML.
@@ -318,7 +319,9 @@ DOMPurify.addHook('afterSanitizeAttributes',node=>{
  if(node.getAttribute?.('target')==='_blank')node.setAttribute('rel','noopener noreferrer');
 });
 function setHTML(element,html){element.innerHTML=DOMPurify.sanitize(String(html),{USE_PROFILES:{html:true},ADD_ATTR:['target']})}
-function photoURL(id,suffix=''){return '/api/photos/'+encodeURIComponent(id)+suffix+'?brand='+encodeURIComponent(BRAND.id)}
+const uploadQueue=new RuanoUploadQueue();
+async function queueUpload(url,blob,label,onSuccess){return uploadQueue.enqueue({url,blob,label,onSuccess}).promise;}
+function photoURL(id,suffix='',brandId=BRAND.id){return '/api/photos/'+encodeURIComponent(id)+suffix+'?brand='+encodeURIComponent(brandId)}
 
 // ===== Marcas: cada empresa cliente tiene su marca y sus propios datos =====
 const DEFAULT_LOGO=document.querySelector('#officialLogo').src;
@@ -626,12 +629,12 @@ async function waitPhotosFor(p){if(photoState.key!==String(p.id)){openPhotos(p.i
  for(let i=0;i<80&&(photoState.key!==String(p.id)||photoState.images.length<need);i++)await new Promise(r=>setTimeout(r,250));if(photoState.images.length<need)throw new Error('Las fotos tardan en cargar, inténtalo de nuevo');}
 async function prepareMedia(item){const p=propertyOf(item),base=`/api/media/${encodeURIComponent(BRAND.id)}/${item.id}`;await fetch(base,{method:'DELETE'});
  if(item.type==='Reel'){if(!p)throw new Error('Este reel no está asociado a un inmueble');const l=await (await fetch(`/api/media/${encodeURIComponent(BRAND.id)}/reel-${p.id}`)).json();if(!l.length)throw new Error('Primero crea el reel en «Fotos y reel» de este inmueble');
-  const v=await (await fetch(l[0].url)).blob();const r=await fetch(`${base}?i=0&type=video`,{method:'PUT',body:v});if(!r.ok)throw new Error('No se pudo guardar el vídeo');return}
- if(item.campaign==='captacion'&&item.owner){const b=await new Promise(r=>ownerImage(item).toBlob(r,'image/jpeg',.9));await fetch(`${base}?i=0`,{method:'PUT',body:b});return}
+  const v=await (await fetch(l[0].url)).blob();await queueUpload(`${base}?i=0&type=video`,v,'Vídeo de publicación');return}
+ if(item.campaign==='captacion'&&item.owner){const b=await new Promise(r=>ownerImage(item).toBlob(r,'image/jpeg',.9));await queueUpload(`${base}?i=0`,b,'Imagen de captación');return}
  if(!p)throw new Error('Esta publicación no está asociada a un inmueble');await waitPhotosFor(p);
  const fmt=document.querySelector('#photoFormat'),prev=fmt.value,n=photoState.images.length;if(item.type==='Historia')fmt.value='9:16';
  const idx=item.type==='Carrusel'?[...Array(Math.min(n,10)).keys()]:item.type==='Historia'?[...Array(Math.min(n,3)).keys()]:[0];
- try{for(const i of idx){paintCanvas(photoState.images[i],photoState.adjustments[i]);const b=await new Promise(r=>photoCanvas.toBlob(r,'image/jpeg',.9));const r=await fetch(`${base}?i=${i}`,{method:'PUT',body:b});if(!r.ok)throw new Error('No se pudo guardar una imagen')}}
+ try{for(const i of idx){paintCanvas(photoState.images[i],photoState.adjustments[i]);const b=await new Promise(r=>photoCanvas.toBlob(r,'image/jpeg',.9));await queueUpload(`${base}?i=${i}`,b,`Imagen ${i+1} de publicación`)}}
  finally{fmt.value=prev;drawPhoto()}}
 document.querySelector('#prepMedia').addEventListener('click',async e=>{const id=Number(document.querySelector('#publishBox').dataset.id),it=content.find(x=>x.id===id);if(!it)return;const b=e.target;b.disabled=true;b.textContent='Preparando…';
  try{await prepareMedia(it);showToast('Imágenes y vídeo generados de nuevo')}catch(err){showToast(err.message)}finally{b.disabled=false;b.textContent='Volver a generar';renderPublishBox(it)}});
@@ -1263,9 +1266,19 @@ async function decodeScaled(file,max){
 function photoKey(){const p=getActiveProperty();return p?String(p.id):null}
 async function encodeForStore(work){const c=document.createElement('canvas');c.width=work.width;c.height=work.height;c.getContext('2d').drawImage(work,0,0);
  let b=await new Promise(r=>c.toBlob(r,'image/webp',STORE_QUALITY));if(!b||b.type!=='image/webp')b=await new Promise(r=>c.toBlob(r,'image/jpeg',STORE_QUALITY));return b}
-async function uploadPhoto(work,key){const blob=await encodeForStore(work);const r=await fetch(`${photoURL(key)}`,{method:'POST',headers:{'Content-Type':blob.type},body:blob});
- if(!r.ok)throw new Error(r.status);work.serverId=(await r.json()).id}
-function deletePhoto(work,key=photoState.key){if(work?.serverId&&key)fetch(`${photoURL(key,'/'+work.serverId)}`,{method:'DELETE'}).catch(()=>{})}
+async function uploadPhoto(work,key,brandId=BRAND.id){
+ const url=photoURL(key,'',brandId);work.uploads||={};let record=work.uploads[url];
+ if(record?.task?.state==='done')return;
+ if(record?.task?.blob){if(['busy','error','cancelled'].includes(record.task.state))uploadQueue.retry(record.task);return record.task.promise;}
+ record||={key:crypto.randomUUID().replaceAll('-','')};work.uploads[url]=record;
+ const blob=await encodeForStore(work);
+ record.task=uploadQueue.enqueue({url,blob,method:'POST',key:record.key,label:`Foto · empresa ${brandId} · inmueble ${key}`,onSuccess:data=>{
+  work.serverId=data.id;
+  if(BRAND.id===brandId&&photoState.key===key&&photoState.images.includes(work))persistPhotos();
+ }});
+ return record.task.promise;
+}
+function deletePhoto(work,key=photoState.key){for(const record of Object.values(work?.uploads||{}))if(record.task)uploadQueue.discard(record.task);if(work?.serverId&&key)fetch(`${photoURL(key,'/'+work.serverId)}`,{method:'DELETE'}).catch(()=>{})}
 async function deleteAllPhotos(key){try{const m=await (await fetch(`${photoURL(key)}`)).json();await Promise.all(m.photos.map(ph=>fetch(`${photoURL(key,'/'+ph.id)}`,{method:'DELETE'})))}catch{}}
 let photoSaveTimer=null;
 function persistPhotos(){const key=photoState.key;if(!key)return;clearTimeout(photoSaveTimer);photoSaveTimer=setTimeout(()=>{if(key!==photoState.key)return;
@@ -1275,7 +1288,7 @@ function updatePhotoOwner(){const p=getActiveProperty(),el=document.querySelecto
 function clearPhotoEditor(){photoState.images.forEach(img=>{if(img.src)URL.revokeObjectURL(img.src);img.close?.()});photoState.images=[];photoState.adjustments=[];photoState.active=0;renderGallery();syncAdjustUI();photoCanvas.style.display='none';document.querySelector('#canvasEmpty').style.display='grid';document.querySelector('#downloadPhoto').disabled=true}
 async function loadPropertyPhotos(){const key=photoKey();updatePhotoOwner();if(key===photoState.key)return;
  // Fotos subidas antes de elegir inmueble: se guardan en el inmueble nuevo en vez de perderse
- if(!photoState.key&&key&&serverReady&&photoState.images.some(im=>!im.serverId)){photoState.key=key;for(const im of photoState.images.filter(x=>!x.serverId)){try{await uploadPhoto(im,key)}catch{}}persistPhotos();showToast('Las fotos se han guardado en el inmueble');return}
+ if(!photoState.key&&key&&serverReady&&photoState.images.some(im=>!im.serverId)){photoState.key=key;for(const im of photoState.images.filter(x=>!x.serverId)){try{await uploadPhoto(im,key)}catch{}}persistPhotos();showToast('Revisa el panel de subidas para confirmar el guardado de las fotos');return}
  photoState.key=key;clearPhotoEditor();
  const p=getActiveProperty(),refInput=document.querySelector('#photoReference');if(p&&(!refInput.value.trim()||refInput.dataset.auto)){refInput.value=`REF. ${p.reference}`;refInput.dataset.auto='1'}
  if(!key||!serverReady)return;
@@ -1342,9 +1355,13 @@ function paintCanvas(img,adjust){
 }
 let drawQueued=false;
 function scheduleDraw(){if(drawQueued)return;drawQueued=true;requestAnimationFrame(()=>{drawQueued=false;drawPhoto()})}
-let coverTimer=0;
-function scheduleCoverUpload(){clearTimeout(coverTimer);const key=photoState.key;if(!key||!serverReady||photoState.active!==0)return;
- coverTimer=setTimeout(()=>{if(photoState.key!==key||photoState.active!==0)return;photoCanvas.toBlob(b=>{if(b)fetch(`${photoURL(key,'/cover')}`,{method:'PUT',headers:{'Content-Type':'image/jpeg'},body:b}).catch(()=>{})},'image/jpeg',.8)},2500)}
+let coverTimer=0;const coverTasks=new Map();
+function scheduleCoverUpload(){clearTimeout(coverTimer);const key=photoState.key,brandId=BRAND.id;if(!key||!serverReady||photoState.active!==0)return;
+ const url=photoURL(key,'/cover',brandId);
+ coverTimer=setTimeout(()=>{if(photoState.key!==key||BRAND.id!==brandId||photoState.active!==0)return;photoCanvas.toBlob(b=>{
+  if(!b)return;const previous=coverTasks.get(url);if(previous)uploadQueue.discard(previous);
+  try{coverTasks.set(url,uploadQueue.enqueue({url,blob:b,label:`Portada · empresa ${brandId} · inmueble ${key}`}));}catch(e){showToast(e.message);}
+ },'image/jpeg',.8)},2500)}
 function drawPhoto(){
  const img=photoState.images[photoState.active];
  if(!img)return;
@@ -1357,18 +1374,18 @@ document.querySelector('#photoInput').addEventListener('change',async e=>{
  let ok=0;
  // Una a una y en el orden elegido: la primera se ve enseguida y no se abren todas a la vez en memoria
  // Las fotos van SIEMPRE al inmueble que estaba abierto al elegirlas, aunque se cambie de inmueble mientras se suben
- const key=photoState.key;
+ const key=photoState.key,brandId=BRAND.id;
  for(const file of files){
   try{
    const work=await prepareImage(file);
-   if(photoState.key!==key){if(key&&serverReady)await uploadPhoto(work,key).catch(()=>showToast(`No se pudo guardar ${file.name} en el servidor`));ok++;continue}
+   if(photoState.key!==key||BRAND.id!==brandId){if(key&&serverReady)await uploadPhoto(work,key,brandId).catch(()=>showToast(`No se pudo guardar ${file.name} en el servidor`));ok++;continue}
    photoState.images.push(work);photoState.adjustments.push(defaultAdjust());ok++;
-   if(key&&serverReady)uploadPhoto(work,key).then(()=>{if(key===photoState.key)persistPhotos()}).catch(()=>showToast(`No se pudo guardar ${file.name} en el servidor`));
+   if(key&&serverReady)uploadPhoto(work,key,brandId).then(()=>{if(key===photoState.key&&BRAND.id===brandId)persistPhotos()}).catch(()=>showToast(`No se pudo guardar ${file.name} en el servidor`));
    if(ok===1){photoState.active=photoState.images.length-1;syncAdjustUI();drawPhoto()}
    renderGallery();
   }catch{showToast(`No se pudo abrir ${file.name}. Usa JPG, PNG o WebP.`)}
  }
- if(ok)showToast(`${ok>1?ok+' fotografías cargadas':'Fotografía cargada'}${photoState.key?' y guardadas':'. Elige un inmueble para guardarlas'}`);
+ if(ok)showToast(`${ok>1?ok+' fotografías cargadas':'Fotografía cargada'}${key?'. Revisa el panel de subidas para confirmar el guardado':'. Elige un inmueble para guardarlas'}`);
 });
 // ===== Reel automático 9:16 (1080x1920) grabado en el navegador con MediaRecorder =====
 const REEL_W=1080,REEL_H=1920,REEL_FPS=30,REEL_FADE=1.2,REEL_OUTRO=4;
@@ -1551,7 +1568,7 @@ async function generateReel(){const mime=reelMime();if(!mime&&!canEncodeReel()){
    next()});
   await new Promise(res=>setTimeout(res,150));rec.stop();await stopped;
   blob=new Blob(chunks,{type:mime.split(';')[0]})}
-  reelBlob=blob;{const pr=getActiveProperty();if(pr){updateProperty(pr.id,{reelAt:Date.now()});if(serverReady&&blob.type==='video/mp4')fetch(`/api/media/${encodeURIComponent(BRAND.id)}/reel-${encodeURIComponent(pr.id)}?i=0&type=video`,{method:'PUT',body:blob}).catch(()=>{})}}if(reelUrl)URL.revokeObjectURL(reelUrl);reelUrl=URL.createObjectURL(reelBlob);
+  reelBlob=blob;{const pr=getActiveProperty();if(pr){updateProperty(pr.id,{reelAt:Date.now()});if(serverReady&&blob.type==='video/mp4')queueUpload(`/api/media/${encodeURIComponent(BRAND.id)}/reel-${encodeURIComponent(pr.id)}?i=0&type=video`,blob,`Reel · inmueble ${pr.id}`).catch(e=>showToast(e.message))}}if(reelUrl)URL.revokeObjectURL(reelUrl);reelUrl=URL.createObjectURL(reelBlob);
   const v=document.createElement('video');v.src=reelUrl;v.controls=true;v.playsInline=true;v.muted=true;screen.replaceChildren(v);v.play().catch(()=>{});
   const mb=(reelBlob.size/1048576).toFixed(1),isMp4=reelBlob.type==='video/mp4';
   status.textContent=isMp4?`Reel listo · ${Math.round(total)} s · ${mb} MB · MP4 1080×1920, listo para Instagram y Facebook.`:`Reel listo (${mb} MB), pero este navegador solo graba WebM: Instagram puede no aceptarlo. Actualiza Chrome para obtener MP4.`;

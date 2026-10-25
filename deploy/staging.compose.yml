@@ -14,6 +14,11 @@ services:
     memswap_limit: 256m
     pids_limit: 128
     restart: "no"
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        order: stop-first
     environment:
       NODE_ENV: production
       PORT: 3000
