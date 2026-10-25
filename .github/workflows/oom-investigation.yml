@@ -23,6 +23,7 @@ jobs:
           MODE: ${{ matrix.mode }}
         run: |
           if [ "$MODE" = baseline-uploads-only ]; then
+            git fetch --no-tags --depth=1 origin 72d4853d5e955fc9239bbdf5a75a6373c42de21e
             git show 72d4853:lib/binary-transfer.mjs > lib/binary-transfer.mjs
           fi
           docker pull node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
