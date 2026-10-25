@@ -1,3 +1,4 @@
+import {watchContainerEvents} from './container-events.mjs';
 import {hostMemory} from './container-memory.mjs';
 import {readFile} from 'node:fs/promises';
 import {rssWindow} from '../lib/soak-analysis.mjs';
@@ -18,7 +19,7 @@ const run=(args,input='')=>new Promise((resolve,reject)=>{const p=spawn('docker'
 const monitorMode=process.env.SOAK_MONITOR||'legacy',diagnostics=process.env.SOAK_DIAGNOSTICS==='1';
 assert.ok(['legacy','host'].includes(monitorMode));
 const diagArgs=diagnostics?['--env','NODE_OPTIONS=--import=/app/lib/oom-telemetry.mjs','--env','RUANO_MEMORY_LOG=/app/data/.process-memory.json']:[];
-let appPid;
+let appPid,eventObserver;
 let madeApp=false,madeVolume=false;const extraVolumes=[],extraContainers=[];
 const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',clientMemoryBytes:512*1024*1024,productionData:false,monitorMode,diagnostics,traffic:process.env.SOAK_TRAFFIC||'mixed',cases,samples:[]};
 const state=async()=>{const [running,oomKilled,exitCode]=(await run(['inspect','--format','{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}}',app])).split(' ');return {running:running==='true',oomKilled:oomKilled==='true',exitCode:Number(exitCode)};};
@@ -33,7 +34,7 @@ async function memory(){try{
 try{
  const env=join(tmp,'synthetic.env');await writeFile(env,['APP_USERNAME=capacity-owner','APP_PASSWORD='+randomBytes(24).toString('hex'),'APP_SESSION_SECRET='+randomBytes(48).toString('hex'),'OLLAMA_URL=http://127.0.0.1:1','SOAK_TRAFFIC='+(process.env.SOAK_TRAFFIC||'mixed')].join('\n'),{mode:0o600});
  await run(['volume','create',volume]);madeVolume=true;
- await run(['create','--name',app,'--network','none','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--memory-swap','256m','--cpus','1','--pids-limit','128','--env-file',env,...diagArgs,'--mount',`type=volume,source=${volume},target=/app/data`,'--health-interval','1s','--health-start-period','1s',image]);madeApp=true;await run(['start',app]);appPid=Number(await run(['inspect','--format','{{.State.Pid}}',app]));
+ await run(['create','--name',app,'--network','none','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--memory-swap','256m','--cpus','1','--pids-limit','128','--env-file',env,...diagArgs,'--mount',`type=volume,source=${volume},target=/app/data`,'--health-interval','1s','--health-start-period','1s',image]);madeApp=true;eventObserver=watchContainerEvents(app);await run(['start',app]);appPid=Number(await run(['inspect','--format','{{.State.Pid}}',app]));
  for(let i=0;i<40;i++){if(await run(['inspect','--format','{{.State.Health.Status}}',app])==='healthy')break;await new Promise(r=>setTimeout(r,500));}
  assert.equal(await run(['inspect','--format','{{.State.Health.Status}}',app]),'healthy');
  assert.equal(await run(['inspect','--format','{{.HostConfig.NetworkMode}}',app]),'none');
@@ -129,7 +130,22 @@ const idleStartedAt=Date.now(),idleHealth=[];while(Date.now()-idleStartedAt<${id
   // Mount at image-owned /app/data once; Docker initializes the new volume UID 1000.
   await run(['run','--rm','--network','none','--read-only','--cap-drop','ALL','--mount',`type=volume,source=${name},target=/app/data`,image,'node','--input-type=module','-e',"import {access} from 'node:fs/promises';await access('/app/data',2);"]);
  }
- const tool=(mounts,script)=>run(['run','--rm','-i','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--memory-swap','256m','--cpus','1','--pids-limit','64',...mounts,image,'node','--input-type=module'],script);
+ let toolIndex=0;
+ const tool=async(mounts,script)=>{
+  const name=id+'-tool-'+(++toolIndex),rows=[];let settled=false;
+  const pending=run(['run','--name',name,'-i','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--memory-swap','256m','--cpus','1','--pids-limit','64',...mounts,...diagArgs,image,'node','--input-type=module'],script).then(value=>({value}),error=>({error}));
+  pending.then(()=>{settled=true;});
+  try{
+   while(!settled){
+    try{const info=JSON.parse(await run(['inspect','--format','{{json .State}}',name]));if(info.Running&&info.Pid){const m=await hostMemory(info.Pid);if(diagnostics){try{await run(['cp',name+':/app/data/.process-memory.json',join(tmp,'tool-process.json')]);m.process=JSON.parse(await readFile(join(tmp,'tool-process.json'),'utf8'));}catch{}}rows.push(m);}}
+    catch{}
+    if(!settled)await new Promise(r=>setTimeout(r,250));
+   }
+   const result=await pending,info=JSON.parse(await run(['inspect','--format','{{json .State}}',name]));
+   (report.recoveryMemory||=[]).push({tool:toolIndex,oomKilled:info.OOMKilled,exitCode:info.ExitCode,samples:rows.length,rssMax:rows.length?Math.max(...rows.map(r=>r.rssBytes)):null,heapMax:rows.length?Math.max(...rows.map(r=>r.process?.heapUsed||0)):null,externalMax:rows.length?Math.max(...rows.map(r=>r.process?.external||0)):null,arrayBuffersMax:rows.length?Math.max(...rows.map(r=>r.process?.arrayBuffers||0)):null,peakCgroupBytes:rows.length?Math.max(...rows.map(r=>r.peakBytes)):null,dirtyMax:rows.length?Math.max(...rows.map(r=>r.stat?.file_dirty||0)):null,rows});
+   if(result.error)throw result.error;return result.value;
+  }finally{await pending;await run(['rm','-f',name]).catch(()=>{});}
+ };
  const backup=JSON.parse(await tool(['--mount',`type=volume,source=${volume},target=/source,readonly`,'--mount',`type=volume,source=${backupVolume},target=/app/data`,'--env','TMPDIR=/app/data/scratch'],`
 import assert from 'node:assert/strict';import {mkdir,stat,writeFile,access} from 'node:fs/promises';import {createHash} from 'node:crypto';import {inventory,verifiedBackup,restoreBackup} from './lib/photo-migration.mjs';
 await mkdir('/app/data/scratch');const original=await inventory('/source');const begin=Date.now(),backup=await verifiedBackup('/source','/app/data/backup');assert.deepEqual(await inventory('/source'),original);
@@ -161,10 +177,11 @@ console.log(JSON.stringify({oldCookieStatus:401,newSessionsValid:true,tenantAFil
 }catch(e){report.success=false;report.failure=e.message;if(madeApp)report.finalState=await state();process.exitCode=1;}
 finally{
  if(report.samples.length){const rows=report.samples;report.memoryEvidence={samples:rows.length,durationMs:rows.at(-1).at-rows[0].at,rssMax:Math.max(...rows.map(r=>r.rssBytes)),heapMax:Math.max(...rows.map(r=>r.process?.heapUsed||0)),externalMax:Math.max(...rows.map(r=>r.process?.external||0)),arrayBuffersMax:Math.max(...rows.map(r=>r.process?.arrayBuffers||0)),anonMax:Math.max(...rows.map(r=>r.anonBytes)),fileMax:Math.max(...rows.map(r=>r.stat?.file||0)),dirtyMax:Math.max(...rows.map(r=>r.stat?.file_dirty||0)),writebackMax:Math.max(...rows.map(r=>r.stat?.file_writeback||0)),sockMax:Math.max(...rows.map(r=>r.stat?.sock||0)),oomKillMax:Math.max(...rows.map(r=>r.events?.oom_kill||0)),tail:rows.slice(-3).map(r=>({at:r.at,process:r.process,currentBytes:r.currentBytes,stat:r.stat,events:r.events}))};}
- await mkdir('artifacts',{recursive:true});await writeFile('artifacts/soak-results.json',JSON.stringify(report,null,2));console.log('::notice title=Soak summary::'+JSON.stringify({success:report.success,failure:report.failure,finalState:report.finalState,profile:report.profile,interruption:report.interruption,image:report.image}));
+ if(eventObserver){await eventObserver.stop();report.dockerEvents=eventObserver.events;if(report.dockerEvents.some(e=>e.observerError)){report.success=false;report.failure='Docker event observation failed';process.exitCode=1;}}
+ await mkdir('artifacts',{recursive:true});await writeFile('artifacts/soak-results.json',JSON.stringify(report,null,2));console.log('::notice title=Soak summary::'+JSON.stringify({success:report.success,failure:report.failure,finalState:report.finalState,dockerEvents:report.dockerEvents,profile:report.profile,interruption:report.interruption,image:report.image}));
  if(report.rssAnalysis)console.log('::notice title=RSS analysis::'+JSON.stringify(report.rssAnalysis));
  if(report.storage)console.log('::notice title=Storage analysis::'+JSON.stringify(report.storage));
- if(report.recovery)console.log('::notice title=Recovery analysis::'+JSON.stringify(report.recovery));
+ if(report.recovery)console.log('::notice title=Recovery analysis::'+JSON.stringify({...report.recovery,memory:report.recoveryMemory?.map(({rows,...r})=>r)}));
  for(const phase of report.phases||[])console.log('::notice title=Soak phase::'+JSON.stringify(phase));
  if(report.memoryEvidence){const {tail,...compact}=report.memoryEvidence;console.log('::notice title=Memory evidence::'+JSON.stringify(compact));for(const r of tail.slice(-1))console.log('::notice title=Memory tail::'+JSON.stringify(r));}
  for(const c of extraContainers)await run(['rm','-f',c]);
