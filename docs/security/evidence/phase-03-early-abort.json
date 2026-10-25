@@ -1,0 +1,16 @@
+{
+  "syntheticOnly": true,
+  "before": {
+    "sha": "78761c625b1ea6ef006a6c3fe98e7c76aded700b",
+    "case": "PassThrough already destroyed before receiveBinary",
+    "observationMs": 200,
+    "receiver": "still pending",
+    "temporaryFiles": 1
+  },
+  "correction": {
+    "sha": "9078ea1",
+    "behavior": "Register abort/error handlers before filesystem awaits; reject disconnected sources; always release admission",
+    "regression": "tests/binary-transfer.test.mjs: already aborted and immediately aborted receivers release slots without leaving partials",
+    "isolatedTestFile": {"tests": 6, "pass": 6, "fail": 0}
+  }
+}

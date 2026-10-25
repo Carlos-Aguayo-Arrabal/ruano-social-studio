@@ -38,41 +38,41 @@ Un temporal nunca figura en el manifest ni coincide con las rutas de archivos se
 
 ## Pruebas y evidencia
 
-Código y medición final: `389cba1cd87ae709330797d8d649138f606d33fd`.
-[CI de PR 40180292748](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40180292748): **Node 22, Node 24 y Docker correctos**. Los checks del commit posterior de documentación se verifican y enlazan en la PR sin atribuirle mediciones de otro SHA. [Resultados JSON completos de las métricas publicadas](evidence/phase-03-resource-results.json).
+Código y medición final: `9078ea1bb5f794079ca8a8ba6091c189cda6031f`.
+[CI de PR 40180699243](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40180699243): **Node 22, Node 24 y Docker correctos**. Los checks del commit posterior de documentación se verifican y enlazan en la PR sin atribuirle mediciones de otro SHA. [Resultados JSON completos de las métricas publicadas](evidence/phase-03-resource-results.json).
 
 **15 casos Docker correctos**: una sola réplica, `memory.max=268435456` comprobado en el cgroup, swap 0, 1 CPU, sin puertos/red externa. Cliente separado de 512 MiB, también sin swap. Ningún incremento del presupuesto de la aplicación.
 
 | Caso | HTTP | Duración observada |
 |---|---|---:|
-| Foto/portada 4 MiB | 200 | 38 ms |
-| Foto/portada 4 MiB + 1 byte | 413 | 36 ms |
-| Imagen 8 MiB | 200 | 62 ms |
-| Imagen 8 MiB + 1 byte | 413 | 66 ms |
-| Vídeo 120 MiB | 200 | 2.833 ms |
-| Vídeo 120 MiB + 1 byte | 413 | 778 ms |
-| 1 vídeo de 120 MiB | 1 × 200 | 773 ms |
-| 2 vídeos simultáneos de 120 MiB | 2 × 200 | 3.219 ms |
-| 4 vídeos simultáneos de 120 MiB | 4 × 200 | 4.183 ms |
-| 8 solicitudes de vídeo simultáneas | 4 × 200 / 4 × 429 | 4.217 ms |
-| 16 solicitudes de vídeo simultáneas | 4 × 200 / 12 × 429 | 4.282 ms |
-| 32 solicitudes de vídeo simultáneas | 4 × 200 / 28 × 429 | 4.422 ms |
-| 4 descargas simultáneas de 120 MiB | 4 × 200, bytes completos | 2.223 ms |
+| Foto/portada 4 MiB | 200 | 21 ms |
+| Foto/portada 4 MiB + 1 byte | 413 | 20 ms |
+| Imagen 8 MiB | 200 | 43 ms |
+| Imagen 8 MiB + 1 byte | 413 | 33 ms |
+| Vídeo 120 MiB | 200 | 531 ms |
+| Vídeo 120 MiB + 1 byte | 413 | 465 ms |
+| 1 solicitudes simultáneas de vídeo de 120 MiB | 1 × 200 | 472 ms |
+| 2 solicitudes simultáneas de vídeo de 120 MiB | 2 × 200 | 1.519 ms |
+| 4 solicitudes simultáneas de vídeo de 120 MiB | 4 × 200 | 3.732 ms |
+| 8 solicitudes simultáneas de vídeo de 120 MiB | 4 × 200 / 4 × 429 | 4.068 ms |
+| 16 solicitudes simultáneas de vídeo de 120 MiB | 4 × 200 / 12 × 429 | 4.503 ms |
+| 32 solicitudes simultáneas de vídeo de 120 MiB | 4 × 200 / 28 × 429 | 3.016 ms |
+| 4 descargas simultáneas de 120 MiB | 4 × 200, bytes completos | 1.308 ms |
 
-Primer rechazo por admisión con vídeos: **8 solicitudes concurrentes** en esta progresión; no se afirma haber buscado el primer valor exacto entre 4 y 8. Es protección 429, no caída por memoria. Con imágenes de 256 KiB: 4/4 HTTP 200 en 35 ms; a concurrencia 8, cinco 200 y tres 429 en 29 ms (los slots pueden liberarse mientras llegan solicitudes).
+Primer rechazo por admisión con vídeos: **8 solicitudes concurrentes** en esta progresión; no se afirma haber buscado el primer valor exacto entre 4 y 8. Es protección 429, no caída por memoria. Con imágenes de 256 KiB: concurrencia 4, 4 HTTP 200 en 17 ms; concurrencia 8, 5 HTTP 200/3 HTTP 429 en 17 ms (los slots pueden liberarse mientras llegan solicitudes).
 
 Todos los casos mantienen `running=true`, `OOMKilled=false`; los lotes de vídeo responden `/health` 200 durante las solicitudes. Tras reiniciar: contenedor saludable, vídeo de 125.829.120 bytes con el mismo SHA-256 antes/después (`e849b6d2…e8f4d4c`), 14 archivos/643.043.158 bytes sintéticos y **cero temporales**. El smoke independiente verifica además persistencia de una sesión activa y rechazo de otra revocada tras el reinicio.
 
-Pico acumulado de cgroup registrado: **272.437.248 bytes (259,82 MiB)**, incluidos caché y procesos de sondeo; el máximo configurado y comprobado sigue siendo **256 MiB**. El kernel puede sobrepasarlo transitoriamente durante reclaim, no se elevó el límite ni se activó swap. La subida individual registra pico acumulado de 185.536.512 bytes; las muestras de RSS/anon no son sus máximos continuos. El mayor RSS muestreado fue 96,97 MiB y el mayor anon muestreado 42,14 MiB; no son picos continuos. Consultar el JSON para cada caso. No se necesita ampliar RAM ni habilitar réplicas para superar este ensayo acotado.
+Pico acumulado de cgroup registrado: **272.048.128 bytes (259,45 MiB)**, incluidos caché y procesos de sondeo; el máximo configurado y comprobado sigue siendo **256 MiB**. El kernel puede sobrepasarlo transitoriamente durante reclaim, no se elevó el límite ni se activó swap. La subida individual registra pico acumulado de 181.329.920 bytes; las muestras de RSS/anon no son sus máximos continuos. El mayor RSS muestreado fue 92,69 MiB y el mayor anon muestreado 34,68 MiB; no son picos continuos. Consultar el JSON para cada caso. No se necesita ampliar RAM ni habilitar réplicas para superar este ensayo acotado.
 
-- Local Node **22.23.4** y **24.19.0**: **65/65** pruebas, incluido Chromium, sin omisiones; `npm run check` correcto.
+- Local Node **22.23.4** y **24.19.0**: **66/66** pruebas, incluido Chromium, sin omisiones; `npm run check` correcto.
 - `npm audit`: **0** vulnerabilidades en todas las severidades, 17 dependencias totales según npm. [JSON](evidence/phase-03-npm-audit.json). La CI bloquea cualquier hallazgo; una auditoría no cubre defectos propios de la aplicación.
 - `d89e928`: Node 22/24 verdes y build/smoke Docker correctos. El vídeo de 120 MiB pasó en 2.658 ms, sin swap/OOM; +1 byte recibió 413. Dos vídeos simultáneos pasaron. La carga completa falló después: no se declaró éxito. Los avisos por caso superaron el límite de diez notices por step, ocultando el informe final en las anotaciones; la descarga del log desde este entorno devuelve Forbidden. `704f932` publica un único informe completo para poder identificar la causa real.
 - `c39421a`: [run 40179978368](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40179978368) identifica el fallo posterior: `docker run exit 137` en el cliente separado al intentar 16 solicitudes; la aplicación permanece activa, `OOMKilled=false`. Cuatro vídeos pasan y ocho dan cuatro 200/cuatro 429, health 200. No se atribuye ese SIGKILL a OOM confirmado del cliente porque entonces se eliminaba automáticamente su contenedor. [Evidencia](evidence/phase-03-client-failure.json). El generador usaba fetch/undici; no se aisló la causa exacta del SIGKILL. Para acotar la producción y retención de cuerpos rechazados, `3d03b7e` usa HTTP nativo con backpressure y cancela generación al recibir respuesta. `e9301e2` conserva el estado de salida/OOM del cliente si falla. Sus recursos no aumentan (512 MiB, ahora sin swap explícito).
 - Build local: falla en `npm ci` dentro del builder por `EAI_AGAIN registry.npmjs.org`; no se atribuye éxito al builder local. Los builds de Actions usan conectividad distinta y su resultado se informa por separado.
 - Fallos de preparación corregidos: el primer fixture TLS reenvió una cabecera `undefined`; el primer test de aborto destruyó streams antes de registrar listeners, provocando una aserción nativa del runner local. Los fixtures se corrigieron y se repitieron. No se cuentan como vulnerabilidades reproducidas de la aplicación.
 
-Los tiempos son observaciones de un runner compartido, no SLA. `memory.peak` incluye caché de archivos y puede superar transitoriamente el límite durante reclaim del kernel; no equivale al heap ni al RSS. Se registran también memoria anónima, RSS y swap. El proceso cliente tiene cgroup separado: su generación de datos no consume el presupuesto de la aplicación. El uso de `docker exec` para medir introduce una pequeña sobrecarga declarada. Se publica el pico retenido por el cgroup, no se estima a partir de muestras aisladas de RSS.
+Los tiempos son observaciones de un runner compartido, no SLA. `memory.peak` incluye caché de archivos y puede superar transitoriamente el límite durante reclaim del kernel; no equivale al heap ni al RSS. Se registran también memoria anónima, RSS y swap. La revisión final añadió `9078ea1`: el receptor anterior dejaba un temporal y seguía pendiente a los 200 ms si la fuente ya estaba desconectada. Se registran error/aborto antes de cualquier await y se rechazan fuentes cerradas, liberando siempre la admisión. [Reproducción sintética y regresión](evidence/phase-03-early-abort.json). El proceso cliente tiene cgroup separado: su generación de datos no consume el presupuesto de la aplicación. El uso de `docker exec` para medir introduce una pequeña sobrecarga declarada. Se publica el pico retenido por el cgroup, no se estima a partir de muestras aisladas de RSS.
 
 ## Una sola réplica: restricción verificada
 
@@ -107,5 +107,6 @@ La prueba acotada no es un benchmark comercial ni una prueba de agotamiento ilim
 - `d89e928`: streaming, temporales, regresiones, generador de staging y diagnóstico de réplica.
 - `704f932`, `c39421a`: evidencia de carga accesible sin exceder los límites de anotaciones de Actions; limpieza no oculta fallos de I/O.
 - `3d03b7e`, `e9301e2`: cliente de carga acotado y registro separado de sus fallos.
+- `9078ea1`: cierre de la ventana de aborto previo a crear el temporal y regresión adicional.
 - `389cba1`: comprueba `memory.max` real, además de swap, y publica métricas finales.
 - El commit de documentación que contiene este informe conserva estas evidencias y la checklist; el HEAD y sus checks se enlazan en la PR #3.
