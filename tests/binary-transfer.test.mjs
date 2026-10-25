@@ -76,3 +76,19 @@ test('HTTP disconnect cleans partial upload and oversize returns 413 without rep
   assert.equal((await f.request('/health')).status,200);
  }finally{await f.close();}
 });
+
+
+test('already aborted and immediately aborted receivers release slots without leaving partials',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'ruano-transfer-'));
+ try{
+  const closed=new PassThrough();closed.destroy();
+  await assert.rejects(receiveBinary(closed,dir,{maxBytes:4096,kind:'jpg'}),/interrumpida/);
+  for(let i=0;i<5;i++){
+   const source=new PassThrough(),pending=receiveBinary(source,dir,{maxBytes:4096,kind:'jpg'});
+   source.destroy(Error('immediate synthetic abort'));
+   await assert.rejects(pending,/immediate synthetic abort/);
+  }
+  assert.deepEqual(await readdir(dir),[]);
+  const r=await receiveBinary(Readable.from([photo]),dir,{maxBytes:photo.length,kind:'jpg'});await r.cleanup();
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
