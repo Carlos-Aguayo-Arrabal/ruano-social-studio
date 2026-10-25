@@ -1,0 +1,41 @@
+name: Isolated OOM investigation
+on:
+  push:
+    branches: [security/phase-05r-oom]
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    if: contains(github.event.head_commit.message, '[oom-diagnose]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [original, legacy, host]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build with the phase 0.5 Node base
+        run: |
+          docker pull node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
+          docker build --build-arg NODE_IMAGE=node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 -t ruano-staging-check .
+      - name: Reproduce configuration without accepting OOM as success
+        env:
+          MODE: ${{ matrix.mode }}
+          RUANO_BASE_REF: node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
+          SOAK_PHASE_SECONDS: 60
+          SOAK_IDLE_SECONDS: 0
+        run: |
+          if [ "$MODE" = original ]; then
+            node scripts/test-soak-phase05-original.mjs ruano-staging-check
+          else
+            SOAK_MONITOR="$MODE" SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oom-diagnostic-${{ matrix.mode }}
+          path: artifacts/*.json

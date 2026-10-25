@@ -1,3 +1,5 @@
+import {hostMemory} from './container-memory.mjs';
+import {readFile} from 'node:fs/promises';
 import {rssWindow} from '../lib/soak-analysis.mjs';
 // Disposable CI-only capacity probe. The app and client share only an isolated
 // loopback namespace, never a host/private network, port or production volume.
@@ -13,14 +15,25 @@ assert.ok(Number.isInteger(idleSeconds)&&idleSeconds>=0&&idleSeconds<=600,'Idle 
 const image=process.argv[2]||'ruano-staging-check',id='ruano-soak-'+randomUUID(),app=id+'-app',volume=id+'-data';
 const tmp=await mkdtemp(join(tmpdir(),'ruano-soak-')),cases=[];
 const run=(args,input='')=>new Promise((resolve,reject)=>{const p=spawn('docker',args,{stdio:['pipe','pipe','pipe']});let out='',err='';p.stdout.on('data',b=>out+=b);p.stderr.on('data',b=>err+=b);p.on('error',reject);p.on('close',c=>c===0?resolve(out.trim()):reject(Error('docker '+args[0]+' exit '+c+': '+err.slice(-1000))));p.stdin.end(input);});
+const monitorMode=process.env.SOAK_MONITOR||'legacy',diagnostics=process.env.SOAK_DIAGNOSTICS==='1';
+assert.ok(['legacy','host'].includes(monitorMode));
+const diagArgs=diagnostics?['--env','NODE_OPTIONS=--import=/app/lib/oom-telemetry.mjs','--env','RUANO_MEMORY_LOG=/app/data/.process-memory.json']:[];
+let appPid;
 let madeApp=false,madeVolume=false;const extraVolumes=[],extraContainers=[];
-const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',clientMemoryBytes:512*1024*1024,productionData:false,cases,samples:[]};
+const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',clientMemoryBytes:512*1024*1024,productionData:false,monitorMode,diagnostics,cases,samples:[]};
 const state=async()=>{const [running,oomKilled,exitCode]=(await run(['inspect','--format','{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}}',app])).split(' ');return {running:running==='true',oomKilled:oomKilled==='true',exitCode:Number(exitCode)};};
-async function memory(){try{const values=await run(['exec',app,'sh','-c',"for f in memory.current memory.peak memory.swap.current memory.swap.max memory.max; do cat /sys/fs/cgroup/$f; done; awk '/^anon /{print $2}' /sys/fs/cgroup/memory.stat; awk '/^VmRSS:/{print $2*1024}' /proc/1/status; awk '/^usage_usec/{print $2}' /sys/fs/cgroup/cpu.stat"]);const [currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,configuredLimitBytes,anonBytes,rssBytes,cpuUsec]=values.split(/\s+/).map(Number);return {currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,configuredLimitBytes,anonBytes,rssBytes,cpuUsec,includesFileCache:true};}catch{return null}}
+async function memory(){try{
+ let m;if(monitorMode==='host')m=await hostMemory(appPid);
+ else {const values=await run(['exec',app,'sh','-c',"for f in memory.current memory.peak memory.swap.current memory.swap.max memory.max; do cat /sys/fs/cgroup/$f; done; awk '/^anon /{print $2}' /sys/fs/cgroup/memory.stat; awk '/^VmRSS:/{print $2*1024}' /proc/1/status; awk '/^usage_usec/{print $2}' /sys/fs/cgroup/cpu.stat"]);const [currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,configuredLimitBytes,anonBytes,rssBytes,cpuUsec]=values.split(/\s+/).map(Number);m={currentBytes,peakBytes,swapCurrentBytes,swapMaxBytes,configuredLimitBytes,anonBytes,rssBytes,cpuUsec,includesFileCache:true,observer:'legacy'};
+ const details=await run(['exec',app,'sh','-c',"cat /sys/fs/cgroup/memory.stat; echo EVENTS; cat /sys/fs/cgroup/memory.events"]);const [stat,events]=details.split('EVENTS\n');const parse=s=>Object.fromEntries(s.trim().split('\n').map(l=>{const [k,v]=l.split(/\s+/);return [k,Number(v)]}));m.stat=parse(stat);m.events=parse(events);
+ }
+ if(diagnostics){try{await run(['cp',app+':/app/data/.process-memory.json',join(tmp,'process.json')]);m.process=JSON.parse(await readFile(join(tmp,'process.json'),'utf8'));}catch{m.processMissing=true;}}
+ return m;
+ }catch{return null}}
 try{
  const env=join(tmp,'synthetic.env');await writeFile(env,['APP_USERNAME=capacity-owner','APP_PASSWORD='+randomBytes(24).toString('hex'),'APP_SESSION_SECRET='+randomBytes(48).toString('hex'),'OLLAMA_URL=http://127.0.0.1:1'].join('\n'),{mode:0o600});
  await run(['volume','create',volume]);madeVolume=true;
- await run(['create','--name',app,'--network','none','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--memory-swap','256m','--cpus','1','--pids-limit','128','--env-file',env,'--mount',`type=volume,source=${volume},target=/app/data`,'--health-interval','1s','--health-start-period','1s',image]);madeApp=true;await run(['start',app]);
+ await run(['create','--name',app,'--network','none','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--memory-swap','256m','--cpus','1','--pids-limit','128','--env-file',env,...diagArgs,'--mount',`type=volume,source=${volume},target=/app/data`,'--health-interval','1s','--health-start-period','1s',image]);madeApp=true;await run(['start',app]);appPid=Number(await run(['inspect','--format','{{.State.Pid}}',app]));
  for(let i=0;i<40;i++){if(await run(['inspect','--format','{{.State.Health.Status}}',app])==='healthy')break;await new Promise(r=>setTimeout(r,500));}
  assert.equal(await run(['inspect','--format','{{.State.Health.Status}}',app]),'healthy');
  assert.equal(await run(['inspect','--format','{{.HostConfig.NetworkMode}}',app]),'none');
@@ -52,7 +65,8 @@ for(const name of ['soaka1','soaka2','soakb1','soakb2']){const r=await req('/api
  let sampling=true;
  let sampleIndex=0,sampleError;
  const disk=async()=>{
-  const lines=(await run(['exec',app,'sh','-c',"du -sk /app/data; du -sk /app/data/media/a 2>/dev/null || echo '0 absent'; du -sk /app/data/media/b 2>/dev/null || echo '0 absent'; df -Pk /app/data | awk 'NR==2{print $4*1024}'; find /app/data -type f | wc -l; find /app/data -name '.upload-*.tmp' | wc -l"])).split('\n');
+  const probe=monitorMode==='host'?['run','--rm','--network','none','--read-only','--cap-drop','ALL','--memory','64m','--memory-swap','64m','--cpus','0.25','--mount',`type=volume,source=${volume},target=/app/data,readonly`,image]:['exec',app];
+  const lines=(await run([...probe,'sh','-c',"du -sk /app/data; du -sk /app/data/media/a 2>/dev/null || echo '0 absent'; du -sk /app/data/media/b 2>/dev/null || echo '0 absent'; df -Pk /app/data | awk 'NR==2{print $4*1024}'; find /app/data -type f | wc -l; find /app/data -name '.upload-*.tmp' | wc -l"])).split('\n');
   return {allocatedBytes:Number(lines[0].split(/\s+/)[0])*1024,tenantAAllocatedBytes:Number(lines[1].split(/\s+/)[0])*1024,tenantBAllocatedBytes:Number(lines[2].split(/\s+/)[0])*1024,freeBytes:Number(lines[3]),files:Number(lines[4]),temporaries:Number(lines[5])};
  };
  report.diskSamples=[];
@@ -70,7 +84,7 @@ const phases=[];for(const concurrency of [1,2,8]){
   const cycle=performance.now(),video=batches%10===0,bytes=video?120*1024*1024:batches%3===0?8*1024*1024:256*1024;
   const batch=Promise.all(Array.from({length:concurrency},async(_,i)=>{const a=accounts[(batches+i)%4],r=await upload('/api/media/'+a.brand+'/slot-'+(i%4)+'?i=0'+(video?'&type=video':''),bytes,video,a.headers);byTenant[a.brand][String(r.status)]=(byTenant[a.brand][String(r.status)]||0)+1;return r;}));
   const hs=performance.now(),h=await req('/health');await h.text();health.push({status:h.status,ms:Math.round(performance.now()-hs)});assert.equal(h.status,200);
-  const r=await batch;results.push(...r);assert.ok(r.every(v=>[200,429].includes(v.status)),'unexpected upload outcome');
+  const r=await batch;results.push(...r);assert.ok(r.every(v=>[200,429].includes(v.status)),JSON.stringify({error:'unexpected upload outcome',concurrency,batches,bytes,results:r}));
   if(batches%5===0){await cancel(accounts[batches%4]);cancellations++;}
   if(batches%10===0){const over=await upload('/api/media/a/oversize?i=0',8*1024*1024+1,false,accounts[0].headers);assert.equal(over.status,413);oversized++;}
   if(batches%10===0){const cross=await req('/api/media/a/slot-0',{headers:accounts[2].headers});assert.equal(cross.status,403);await cross.text();}
@@ -145,11 +159,13 @@ console.log(JSON.stringify({oldCookieStatus:401,newSessionsValid:true,tenantAFil
  report.success=true;
 }catch(e){report.success=false;report.failure=e.message;if(madeApp)report.finalState=await state();process.exitCode=1;}
 finally{
+ if(report.samples.length){const rows=report.samples;report.memoryEvidence={samples:rows.length,durationMs:rows.at(-1).at-rows[0].at,rssMax:Math.max(...rows.map(r=>r.rssBytes)),heapMax:Math.max(...rows.map(r=>r.process?.heapUsed||0)),externalMax:Math.max(...rows.map(r=>r.process?.external||0)),arrayBuffersMax:Math.max(...rows.map(r=>r.process?.arrayBuffers||0)),anonMax:Math.max(...rows.map(r=>r.anonBytes)),fileMax:Math.max(...rows.map(r=>r.stat?.file||0)),dirtyMax:Math.max(...rows.map(r=>r.stat?.file_dirty||0)),writebackMax:Math.max(...rows.map(r=>r.stat?.file_writeback||0)),sockMax:Math.max(...rows.map(r=>r.stat?.sock||0)),oomKillMax:Math.max(...rows.map(r=>r.events?.oom_kill||0)),tail:rows.slice(-3).map(r=>({at:r.at,process:r.process,currentBytes:r.currentBytes,stat:r.stat,events:r.events}))};}
  await mkdir('artifacts',{recursive:true});await writeFile('artifacts/soak-results.json',JSON.stringify(report,null,2));console.log('::notice title=Soak summary::'+JSON.stringify({success:report.success,failure:report.failure,finalState:report.finalState,profile:report.profile,interruption:report.interruption,image:report.image}));
  if(report.rssAnalysis)console.log('::notice title=RSS analysis::'+JSON.stringify(report.rssAnalysis));
  if(report.storage)console.log('::notice title=Storage analysis::'+JSON.stringify(report.storage));
  if(report.recovery)console.log('::notice title=Recovery analysis::'+JSON.stringify(report.recovery));
  for(const phase of report.phases||[])console.log('::notice title=Soak phase::'+JSON.stringify(phase));
+ if(report.memoryEvidence){const {tail,...compact}=report.memoryEvidence;console.log('::notice title=Memory evidence::'+JSON.stringify(compact));for(const r of tail.slice(-1))console.log('::notice title=Memory tail::'+JSON.stringify(r));}
  for(const c of extraContainers)await run(['rm','-f',c]);
  for(const v of extraVolumes)await run(['volume','rm',v]);
  if(madeApp)await run(['rm','-f',app]);if(madeVolume)await run(['volume','rm',volume]);await rm(tmp,{recursive:true,force:true});
