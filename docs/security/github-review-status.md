@@ -1,10 +1,11 @@
-# Estado GitHub · fase 0.4 · 25/10/2026
+# Estado GitHub · fase 0.5 · 25/10/2026
 
-- PR [#3](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/pull/3) **borrador**, rama `security/phase-0-2026-10-24` hacia main; sin fusión ni despliegue.
-- Código medido: `80cfcb3e5bed4d1fb0aaaf0a10cd3878f034bcc3`; [CI PR 40182903549](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40182903549), Node 22/24 y Docker verdes. La PR enlaza también los checks del HEAD posterior de documentación.
-- **72/72 pruebas por runtime**, incluido Chromium, y npm audit **0**. UX con progreso, cancelar, 429/reintento, idempotencia, destino fijo y rechazo de cambio de cuenta.
-- Carga sostenida: **181,30 s**, 526 subidas (346 HTTP 200 / 180 HTTP 429), 0 fallos inesperados, 158 health HTTP 200; CPU media 19,32 %, sin OOM/swap, archivo previo conservado tras SIGKILL y cero temporales. El informe describe las muestras de RSS y sus límites.
-- El primer generador falló por sintaxis antes de la carga; se conserva la evidencia, sin atribuirle éxito. [Informe, métricas, archivos y commits](phase-04.md).
-- Staging propuesto: una réplica/proceso, proyecto/volumen/env sintéticos independientes, sin infraestructura creada. TLS/red/volumen/recuperación externos pendientes. Cuotas persistentes y soak prolongado pendientes; no tráfico abierto/producción.
+PR [#3](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/pull/3) **borrador**, rama `security/phase-0-2026-10-24`, sin fusión/despliegue ni cambios en main. Base de esta fase `865e1b5`.
 
-[Checklist vigente](staging-checklist.md), [recuperación](photo-recovery.md), [transición de sesiones](session-transition.md). Las fases anteriores conservan sus métricas por SHA: [0.1](phase-01.md), [0.2](phase-02.md), [0.3](phase-03.md). No atribuir a un SHA resultados de código posterior.
+- Regresiones: 75/75 en Node 22/24, Chromium incluido; audit npm 0. Las pruebas cortas completas de `13ed3c0` y `b31f61e` pasaron.
+- **F05-MEM-01 bloqueante:** `d64e947` falló por OOM en [corto 40217906593](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40217906593) y [ampliado 40217901995](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40217901995), con 256 MiB sin swap. Ventanas de muestras 150,046/883,351 s. No declarar corregido por un check posterior verde.
+- [Recuperación de telemetría 40219760323](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40219760323): lectura de artifacts sintéticos, sin cambios de aplicación; no es corrección del OOM. Las incidencias de harness/proveniencia se separan en el informe.
+- Backup/restore correctos en [corto 40217442868](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40217442868): hash de inventario, 24 archivos, origen intacto y sesiones antiguas rechazadas. No equivale a backup externo del VPS.
+- [Informe 0.5](phase-05.md), [checklist](staging-checklist.md) y [perfil EasyPanel](../../deploy/easypanel-staging.md). Plan con `candidateApproved=false`; no crear todavía infraestructura real.
+
+El último HEAD y sus checks reales se enlazan en la PR. No se accede a Hostinger, fotos/usuarios/credenciales de clientes, dominios o volúmenes de producción ni recursos de pago. TLS/red/swap/volumen/recuperación externos siguen pendientes; el mismo VPS no implica independencia física.

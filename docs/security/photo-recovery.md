@@ -108,3 +108,48 @@ fase. La limpieza de arranque solo retira temporales reservados `.upload-*.tmp`
 del formato exacto del servidor en árboles de recursos; no reasigna propietarios
 ni elimina fotografías finales. Las colisiones/huérfanas siguen sin asignarse y
 requieren el plan revisado y la copia/restauración verificadas anteriores.
+
+## Snapshot independiente de migración · fase 0.5
+
+Se añade `backup`, que no reasigna ni migra fotos. La opción offline es una
+confirmación del operador: **no para servicios ni bloquea escritores**. Antes,
+detener únicamente el nuevo staging autorizado, verificar cero escritores y
+montar el volumen origen en solo lectura en el helper. Nunca usar rutas de
+producción en el ensayo.
+
+```sh
+TMPDIR=/RUTA_SCRATCH_NUEVA_Y_ESCRIBIBLE node scripts/photo-storage.mjs backup \
+  /RUTA_DATA_SINTETICA /RUTA_BACKUP_NUEVA --offline-confirmed
+node scripts/photo-storage.mjs restore /RUTA_BACKUP_NUEVA /RUTA_RESTORE_NUEVA
+```
+
+Son marcadores de rutas, no órdenes para copiar directamente sobre el VPS. El
+scratch debe existir, ser privado y tener espacio de disco para la restauración
+de verificación; no usar el tmpfs `/tmp` de 32 MiB para snapshots grandes. Backup,
+scratch y destino de restore deben quedar separados del DATA_DIR y el restore
+fuera del backup. Los destinos de backup/restore deben ser nuevos; no se
+sobrescriben.
+
+La copia cubre **todo DATA_DIR**, incluyendo store, usuarios, medios, fotos,
+ajustes, revisiones/contactos y metadata de sesiones que existan. No incluye por
+sí sola Dockerfile/imagen, versión desplegada, configuración del panel, env ni
+claves fuera del volumen. Guardar esos elementos por separado en soporte
+protegido; no pegarlos en logs ni en el repositorio. Verificar cifrado, permisos y
+copia fuera del servidor en la futura tarea autorizada. Una copia en otro volumen
+del mismo host no protege de su pérdida.
+
+Comparar hashes e inventario antes de arrancar el restaurado. Archivar las
+sesiones del snapshot como histórico privado **fuera del DATA_DIR activo** y
+arrancar con registro nuevo; probar cookie anterior 401, nuevos logins,
+aislamiento A/B, archivo válido y hash estable. No modificar el backup original
+al preparar el registro nuevo. Si falla cualquier comparación o comprobación,
+mantener el restaurado aislado y el origen detenido/intacto hasta revisión; no
+borrar ni sustituir el volumen origen como rollback automático.
+
+Política propuesta para el staging nuevo: snapshot antes de cada actualización y
+al terminar cada sesión de pruebas; si sigue en uso, al menos diario (objetivo
+RPO 24 h). Retención inicial propuesta de tres snapshots revisados, sin borrado
+automático de ninguno hasta aprobar la política. Objetivo RTO provisional 30 min
+una vez accesible el backup, pendiente de medir en el destino real. Los tiempos
+de CI son solo evidencia del laboratorio. El dataset sintético debe poder
+recrearse; ninguna cifra se atribuye a datos o servicios reales.

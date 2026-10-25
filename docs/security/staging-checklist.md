@@ -143,3 +143,29 @@ Referencia vigente: [phase-04.md](phase-04.md). Las métricas anteriores conserv
 - [ ] Verificar que el proxy no introduce buffering ilimitado de subidas/descargas y que límites de tamaño/timeout conservan los 120 MiB permitidos sin aumentar recursos para ocultar fallos.
 
 Los checks del HEAD de documentación se enlazan en la PR. Ninguna casilla automática da por verificados TLS, DNS, egress, volúmenes, recursos Swarm ni backups externos reales.
+
+## Puerta final de fase 0.5
+
+Plan de parámetros: [deploy/easypanel-staging.md](../../deploy/easypanel-staging.md).
+Informe vigente: [phase-05.md](phase-05.md).
+
+- [ ] Commit revisado y base de Node fijados a los SHA/digest efectivamente probados; revisar build e imagen, no solo rama/etiqueta.
+- [ ] Bundle privado nuevo, validación de Compose sin `up`, `synthetic.env` y `perimeter.env` distintos 0600. El plan no crea DNS, red, volumen o servicio ni demuestra disponibilidad de nombres.
+- [ ] Revisar ensayo largo, crecimiento/pendiente de RSS, reposo y disco. No equiparar meseta de minutos con ausencia de fugas ni cuota activa con cuota de almacenamiento.
+- [ ] Backup offline en volumen nuevo, restauración exacta por SHA-256 en otro nuevo, negativo de corrupción y rechazo de destinos existentes; sesiones obsoletas archivadas fuera del DATA_DIR restaurado; cookie antigua 401 y A/B revalidados.
+- [ ] Dominio nuevo confirmado; TLS/renovación, perímetro de todas las rutas y límite de cuerpo/timeout/buffering del proxy verificados antes de acceso.
+- [ ] **Antes de crear**: confirmar que el panel permite red exclusiva sin conectar ni siquiera temporalmente a una overlay de producción. Si necesita cambiar el proxy o una red global existente, detenerse; esta autorización no cubre ese cambio.
+- [ ] Verificar cómo se garantiza swap desactivado en la tarea Swarm; no asumir que `memswap_limit` de Compose se aplica. Sin swapoff/sysctl global o ampliación de RAM para pasar pruebas.
+- [ ] Confirmar capacidad libre real y límites aplicables sin afectar servicios existentes; el mismo VPS comparte kernel/CPU/disco. Presupuesto sintético 1 GiB (operativo, no cuota), alertar al 70 %, suspender nuevas pruebas al 80 %, al menos 8 GiB libres para ensayos y copias.
+- [ ] Backup fuera del host protegido y restore real del nuevo staging antes de uso sostenido; fijar RPO/RTO/retención. No presentar los volúmenes de CI como copia externa operativa.
+- [ ] La autorización posterior debe nombrar proyecto/servicio/FQDN/red/volumen nuevos y su rollback; excluir main, merge, producción, servicios existentes, cambios globales, datos/credenciales reales y recursos de pago. Si no se puede satisfacer esa matriz, **no crear**.
+
+### Resultado de validación 0.5: bloqueado
+
+- [x] 75/75 regresiones Node 22 y 24, Chromium y auditoría npm 0; configuración sintética generada y validada sin crear infraestructura.
+- [x] Backup/restore sintéticos correctos en el corto `13ed3c0`: inventario idéntico, corrupción rechazada, sesiones antiguas 401 y A/B revalidados.
+- [ ] **Cerrar F05-MEM-01 antes de autorizar creación real:** OOM en `d64e947` tanto en corto (150 s observados) como ampliado (883 s), 256 MiB sin swap. Un check posterior verde no cierra estos fallos.
+- [ ] Medir fuera del cgroup y aislar memoria de aplicación, caché/kernel y sondeos; repetir con presupuesto idéntico y conservar evidencia de fallos. No aumentar RAM para ocultarlos.
+- [ ] No atribuir a los runs interrumpidos reposo, limpieza final o restauración que no llegaron a ejecutar. Revisar el informe y las trazas originales.
+
+La autorización de creación real sigue **no recomendada**. El siguiente paso es diagnóstico sintético de memoria y comprobación autorizada de capacidades del panel; no crear servicios para sortear un bloqueo ni modificar otros existentes.

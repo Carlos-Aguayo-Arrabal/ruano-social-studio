@@ -1,0 +1,121 @@
+{
+  "sourceSha": "d64e947be43846fd15bb32fe439e4491b46694e7",
+  "sourceRun": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40217906593",
+  "replayRun": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40219760323",
+  "summary": {
+    "success": false,
+    "failure": "docker run exit 1: node:internal/modules/run_main:123\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: unexpected upload outcome\n    at file:///app/[eval1]:25:49\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: '==',\n  diff: 'simple'\n}\n\nNode.js v22.23.4\n",
+    "finalState": {
+      "running": false,
+      "oomKilled": true,
+      "exitCode": 137
+    },
+    "plannedActiveDurationMs": 180000,
+    "observedSamples": 143,
+    "observedDurationMs": 150046,
+    "configuredMemoryLimits": [
+      268435456
+    ],
+    "maxObservedRssBytes": 113389568,
+    "maxObservedAnonBytes": 47190016,
+    "maxObservedCgroupPeakBytes": 268693504,
+    "swapUsedMaxBytes": 0,
+    "cpuAveragePercent": 17.88396425096304,
+    "diskSamplesCount": 16,
+    "measurementNote": "Original in-cgroup docker-exec probes consume part of the same 256 MiB budget; these data do not isolate causality."
+  },
+  "rssTail": {
+    "trend": {
+      "samples": 143,
+      "durationMs": 150046,
+      "initialMedianBytes": 92647424,
+      "finalMedianBytes": 105320448,
+      "deltaMedianBytes": 12673024,
+      "slopeMiBPerMinute": 6.894172014542784,
+      "minBytes": 87572480,
+      "maxBytes": 113389568
+    },
+    "lastSamples": [
+      {
+        "offsetSeconds": 140.537,
+        "rssBytes": 105234432,
+        "anonBytes": 39129088,
+        "currentBytes": 150679552,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 141.583,
+        "rssBytes": 107143168,
+        "anonBytes": 40943616,
+        "currentBytes": 62885888,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 142.627,
+        "rssBytes": 107900928,
+        "anonBytes": 41705472,
+        "currentBytes": 63913984,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 143.673,
+        "rssBytes": 104603648,
+        "anonBytes": 38404096,
+        "currentBytes": 86274048,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 144.718,
+        "rssBytes": 106725376,
+        "anonBytes": 40521728,
+        "currentBytes": 62472192,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 145.763,
+        "rssBytes": 105066496,
+        "anonBytes": 38866944,
+        "currentBytes": 60657664,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 146.807,
+        "rssBytes": 104960000,
+        "anonBytes": 38756352,
+        "currentBytes": 77492224,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 147.852,
+        "rssBytes": 107069440,
+        "anonBytes": 40869888,
+        "currentBytes": 62631936,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 148.995,
+        "rssBytes": 103981056,
+        "anonBytes": 37785600,
+        "currentBytes": 168443904,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      },
+      {
+        "offsetSeconds": 150.046,
+        "rssBytes": 104554496,
+        "anonBytes": 44908544,
+        "currentBytes": 190320640,
+        "peakBytes": 268693504,
+        "swapUsedBytes": 0
+      }
+    ]
+  }
+}

@@ -98,3 +98,18 @@ por usuario/empresa y carga Docker sostenida con datos sintéticos.
 La [checklist de staging](docs/security/staging-checklist.md) mantiene una réplica,
 volumen y secretos independientes y validación pendiente de TLS/red/recuperación.
 No se ha creado ni desplegado infraestructura en Hostinger.
+
+### Preparación final · fase 0.5
+
+[Informe y resultados](docs/security/phase-05.md) y
+[perfil de EasyPanel sin aplicar](deploy/easypanel-staging.md): commit y base Node
+fijados, secretos de aplicación/perímetro independientes, prueba ampliada de RSS y
+disco y restauración sintética en volumen nuevo. El nuevo comando
+`photo-storage.mjs backup` exige confirmación offline y verifica una restauración.
+La creación real sigue limitada por la checklist: no redes compartidas de
+producción, controles efectivos de Swarm y dominio/TLS/backup externo pendientes.
+
+**Estado 0.5: creación real bloqueada.** El candidato registró OOM tanto en
+ensayo corto como ampliado con 256 MiB sin swap. Los 75 tests y los ensayos de
+backup correctos no sustituyen cerrar ese hallazgo ni validar la segregación de
+red/swap/TLS en EasyPanel. No se ha creado infraestructura.
