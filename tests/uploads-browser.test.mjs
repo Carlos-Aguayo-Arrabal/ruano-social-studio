@@ -54,3 +54,15 @@ test('Chromium: queued/active cancellation, progress, oversize and retry control
   await panel.locator('[data-upload-state="error"]').waitFor();assert.match(await panel.textContent(),/supera el tamaño/);assert.deepEqual(t.errors,[]);
  }finally{await t.close();}
 });
+
+test('Chromium: retry is refused if another tab replaces the authenticated account',async()=>{
+ const t=await browserFixture();try{
+  let first=true;await t.page.route('**/api/photos/101?brand=a',async route=>{if(route.request().method()!=='POST')return route.continue();if(first){first=false;const r=await route.fetch();assert.equal(r.status(),201);return route.abort('failed');}return route.continue();});
+  await t.page.locator('#photoInput').setInputFiles(join(root,'tests/fixtures/photo.jpg'));await t.page.locator('#uploadPanel [data-upload-state="error"]').waitFor();
+  const owner=await t.f.login('testowner');await t.page.context().addCookies([{name:'ruano_session',value:owner.split('=')[1],url:t.f.origin}]);
+  const response=t.page.waitForResponse(r=>r.request().method()==='POST'&&r.url().includes('/api/photos/101?'));
+  await t.page.locator('#uploadPanel [data-upload-state="error"]').getByRole('button',{name:'Reintentar'}).click();assert.equal((await response).status(),409);
+  await t.page.waitForFunction(()=>document.querySelector('#uploadPanel').textContent.includes('La cuenta ha cambiado'));
+  assert.equal((await(await t.f.request('/api/photos/101?brand=a',owner)).json()).photos.length,1);assert.deepEqual(t.errors,[]);
+ }finally{await t.close();}
+});

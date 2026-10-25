@@ -319,7 +319,7 @@ DOMPurify.addHook('afterSanitizeAttributes',node=>{
  if(node.getAttribute?.('target')==='_blank')node.setAttribute('rel','noopener noreferrer');
 });
 function setHTML(element,html){element.innerHTML=DOMPurify.sanitize(String(html),{USE_PROFILES:{html:true},ADD_ATTR:['target']})}
-const uploadQueue=new RuanoUploadQueue();
+const uploadQueue=new RuanoUploadQueue({getUserId:()=>ME?.id});
 async function queueUpload(url,blob,label,onSuccess){return uploadQueue.enqueue({url,blob,label,onSuccess}).promise;}
 function photoURL(id,suffix='',brandId=BRAND.id){return '/api/photos/'+encodeURIComponent(id)+suffix+'?brand='+encodeURIComponent(brandId)}
 

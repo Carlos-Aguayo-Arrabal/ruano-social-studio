@@ -8,7 +8,7 @@ import {randomBytes,randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 const image=process.argv[2]||'ruano-staging-check',id='ruano-soak-'+randomUUID(),app=id+'-app',volume=id+'-data';
 const tmp=await mkdtemp(join(tmpdir(),'ruano-soak-')),cases=[];
-const run=(args,input='')=>new Promise((resolve,reject)=>{const p=spawn('docker',args,{stdio:['pipe','pipe','pipe']});let out='',err='';p.stdout.on('data',b=>out+=b);p.stderr.on('data',b=>err+=b);p.on('error',reject);p.on('close',c=>c===0?resolve(out.trim()):reject(Error('docker '+args[0]+' exit '+c+': '+err.slice(0,500))));p.stdin.end(input);});
+const run=(args,input='')=>new Promise((resolve,reject)=>{const p=spawn('docker',args,{stdio:['pipe','pipe','pipe']});let out='',err='';p.stdout.on('data',b=>out+=b);p.stderr.on('data',b=>err+=b);p.on('error',reject);p.on('close',c=>c===0?resolve(out.trim()):reject(Error('docker '+args[0]+' exit '+c+': '+err.slice(-1000))));p.stdin.end(input);});
 let madeApp=false,madeVolume=false;
 const report={memoryLimitBytes:256*1024*1024,cpus:1,network:'none',clientCgroup:'separate',clientMemoryBytes:512*1024*1024,productionData:false,cases,samples:[]};
 const state=async()=>{const [running,oomKilled,exitCode]=(await run(['inspect','--format','{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}}',app])).split(' ');return {running:running==='true',oomKilled:oomKilled==='true',exitCode:Number(exitCode)};};
@@ -41,7 +41,7 @@ async function upload(path,bytes,video=false,sendHeaders=headers){const start=pe
  });
  out.setTimeout(90000,()=>out.destroy(Error('synthetic client timeout')));out.on('error',e=>finish({status:null,networkError:e.code||e.name}));source.on('error',e=>out.destroy(e));source.pipe(out);
 });}`;
- await client(common+`const r=await req('/api/sync',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({brands:{upsert:['a','b'].map(id=>({id,name:'Synthetic '+id}))},data:{a:{properties:{upsert:[{id:101}]}},b:{properties:{upsert:[{id:101}]}}})});assert.equal(r.status,200);
+ await client(common+`const r=await req('/api/sync',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({brands:{upsert:['a','b'].map(id=>({id,name:'Synthetic '+id}))},data:Object.fromEntries(['a','b'].map(id=>[id,{properties:{upsert:[{id:101}]}}]))})});assert.equal(r.status,200);
 for(const name of ['soaka1','soaka2','soakb1','soakb2']){const r=await req('/api/users',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({username:name,password:process.env.APP_PASSWORD,role:'agency',brands:[name[4]]})});assert.equal(r.status,200);}`);
  report.baselineMemory=await memory();assert.equal(report.baselineMemory.configuredLimitBytes,256*1024*1024);assert.equal(report.baselineMemory.swapMaxBytes,0);
  const phaseMs=60000;report.plannedDurationMs=phaseMs*3;report.phaseConcurrency=[1,2,8];

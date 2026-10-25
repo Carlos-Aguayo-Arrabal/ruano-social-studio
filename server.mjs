@@ -481,6 +481,7 @@ function sendJson(res, status, data) {
 }
 
 async function handleApi(req, res, url, user) {
+  if(req.headers['x-upload-user'] && req.headers['x-upload-user']!==user.id && (url.pathname.startsWith('/api/photos/') || url.pathname.startsWith('/api/media/')) && ['POST','PUT'].includes(req.method))return sendJson(res,409,{code:'UPLOAD_IDENTITY_CHANGED',error:'La cuenta ha cambiado. Comprueba la ficha antes de volver a subir.'});
   if (url.pathname.startsWith('/api/meta/') || url.pathname.startsWith('/api/media/')) return handleMeta(req, res, url, user);
   if (url.pathname.startsWith('/api/gdrive/')) return handleGdrive(req, res, url, user);
   const deny = () => sendJson(res, 403, { error: 'No tienes acceso a esta empresa' });

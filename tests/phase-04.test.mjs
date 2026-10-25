@@ -15,6 +15,7 @@ test('photo idempotency persists across concurrent retry, lost response and rest
   const results=await Promise.all([send(),send()]);assert.ok(results.every(r=>r.status===201));const [first,second]=await Promise.all(results.map(r=>r.json()));assert.equal(first.id,second.id);
   const other=await send(b,'b');assert.equal(other.status,201);assert.notEqual((await other.json()).id,first.id);
   assert.equal((await send(b,'a')).status,403);
+  const owner=await f.login('testowner');assert.equal((await send(owner,'a',{...options,headers:{...options.headers,'X-Upload-User':'aaaaaaaaaaaa'}})).status,409);
   assert.equal((await send(a,'a',{...options,body:Buffer.concat([photo,Buffer.from('different')])})).status,409);
   assert.equal((await send(a,'a',{...options,headers:{'Idempotency-Key':'../invalid'}})).status,400);
   await f.stop();await f.launch();assert.equal((await send()).status,201);
