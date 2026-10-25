@@ -1,3 +1,4 @@
+import {rssWindow} from '../lib/soak-analysis.mjs';
 // Disposable CI-only capacity probe. The app and client share only an isolated
 // loopback namespace, never a host/private network, port or production volume.
 import {spawn} from 'node:child_process';
@@ -6,7 +7,6 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
-import {rssWindow} from '../lib/soak-analysis.mjs';
 const phaseSeconds=Number(process.env.SOAK_PHASE_SECONDS||60),idleSeconds=Number(process.env.SOAK_IDLE_SECONDS||0);
 assert.ok(Number.isInteger(phaseSeconds)&&phaseSeconds>=60&&phaseSeconds<=1800,'Phase must be 60–1800 seconds');
 assert.ok(Number.isInteger(idleSeconds)&&idleSeconds>=0&&idleSeconds<=600,'Idle must be 0–600 seconds');
@@ -30,8 +30,7 @@ try{
   catch(e){const info=JSON.parse(await run(['inspect','--format','{{json .State}}',name]));(report.clientFailures||=[]).push({oomKilled:info.OOMKilled,exitCode:info.ExitCode});throw e;}
   finally{await run(['rm','-f',name]).catch(()=>{});}
  };
- const common=`import assert from 'node:assert/strict';
-import {rssWindow} from '../lib/soak-analysis.mjs';import {Readable} from 'node:stream';import {performance} from 'node:perf_hooks';import {createHash} from 'node:crypto';import {request as httpRequest} from 'node:http';
+ const common=`import assert from 'node:assert/strict';import {Readable} from 'node:stream';import {performance} from 'node:perf_hooks';import {createHash} from 'node:crypto';import {request as httpRequest} from 'node:http';
 const req=(p,o={})=>fetch('http://127.0.0.1:3000'+p,{redirect:'manual',signal:AbortSignal.timeout(90000),...o});
 const login=await req('/login',{method:'POST',body:new URLSearchParams({username:process.env.APP_USERNAME,password:process.env.APP_PASSWORD})});assert.equal(login.status,303);
 const cookie=login.headers.get('set-cookie').split(';')[0],headers={Cookie:cookie};
