@@ -52,3 +52,9 @@ Archivos nuevos: `lib/synthetic-supervisor.mjs`, `scripts/supervisor-docker.mjs`
 - [ ] Autorización nominativa separada para inspección/creación y carga larga. No se obtiene con CI verde.
 
 **GO solo para revisar estos controles y sus ensayos cortos. NO-GO para crear staging o ejecutar seis horas.** Las puertas restantes no se sustituyen por más RAM, réplicas, cambios globales o contratación. No se despliega ni fusiona nada.
+
+## Trazabilidad de la validación
+
+Primer intento `d2827cc`, run [40307346402](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40307346402): Node22/24 correctos (88pruebas); Docker build, arranque y recursos previos correctos. El adaptador nuevo falló al inspeccionar Health inexistente **antes de start** y no ejerció las paradas. No se cuenta como OOM ni como aceptación. Se corrige con acceso opcional al campo; los posteriores resultados reales quedan en PR.
+
+La telemetría se precarga únicamente en PID1 de la aplicación: los exec de diagnóstico limpian NODE_OPTIONS para no sobrescribir su gauge. Se lee CPU efectiva de cpu.max, no solo metadata Docker. Reservas incluyen metadata observada y todos los vuelos; journal serializa escrituras concurrentes, rechaza overflow antes de escribir y falla cerrado ante errores. Se amplían negativos de ledger obstruido y competencia por presupuesto de logs sin cambiar las79pruebas anteriores. `scripts/container-memory.mjs` añade únicamente la lectura cpu.max para ese control; ningún cambio de negocio.
