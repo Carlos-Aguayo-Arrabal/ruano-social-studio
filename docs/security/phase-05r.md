@@ -1,4 +1,4 @@
-# Fase 0.5R · OOM a 256 MiB · 25/10/2026
+# Fase 0.5R · OOM a 256 MiB · 26/10/2026
 
 Rama independiente `security/phase-05r-oom`, desde `dd97f34`. PR [#5](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/pull/5) en borrador **hacia la rama de seguridad**, sin fusionar. Main y PR #3 no se modifican. Sin producción, EasyPanel/Hostinger, staging real, datos/credenciales de clientes, compras ni publicación de imágenes.
 
@@ -47,7 +47,30 @@ La causalidad se apoya en reproducción, desglose de memoria, control de I/O y e
 
 Regresiones locales: Node 22.23.4 y 24.19.0, **78/78 por runtime**, incluidas las **75 existentes**, Chromium, aislamiento de empresas, cookies/revocación, foto idempotente, 429/413, cancelaciones y SMTP sintético. Nuevas pruebas: gauge privado/acotado, writer con writes parciales/límite de pendiente y error de sincronización que no se acepta como éxito. `npm audit`: 0 vulnerabilidades conocidas; no se añaden dependencias.
 
-Aceptación ampliada en ejecución: [40222558069](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40222558069), commit `8e93d85`. Tres runs previstos de 15 min activos + 2 min de reposo: guion original y dos instrumentados host independientes. Se incorporan abajo resultados reales al terminar; no se atribuye éxito a la preparación.
+Aceptación ampliada **3/3 correcta**: [40222558069](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40222558069), candidato `8e93d857d4e0e2c932a3f78b5a60253f87e82780`. Cada ejecución superó los 883 s del fallo histórico: 15 minutos activos + 2 minutos de reposo, seguidos de interrupción/recuperación. Resúmenes calculados directamente desde sus artifacts: [40298625350](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40298625350). Evidencia numérica permanente: `evidence/phase-05r-acceptance-*.json` y `evidence/phase-05r-profile-*.json`; los artifacts completos dependen de la retención de Actions.
+
+| Métrica | Guion original | Host A | Host B |
+|---|---:|---:|---:|
+| Duración muestreada (s) | 1.022,824 | 1.021,455 | 1.022,186 |
+| RSS máximo (MiB) | 129,67 | 128,80 | 128,73 |
+| Heap máximo (MiB) | Sin preload | 17,82 | 18,11 |
+| External máximo (MiB) | Sin preload | 32,36 | 35,35 |
+| ArrayBuffers máximo (MiB) | Sin preload | 27,89 | 31,75 |
+| Dirty máximo (MiB) | Sin desglose | 15,27 | 13,95 |
+| memory.peak (MiB) | 259,78 | 261,24 | 257,32 |
+| CPU media (% de un núcleo) | 18,20 | 16,48 | 14,47 |
+| Subidas: 200 / 429 | 1.987 / 1.088 | 1.971 / 1.076 | 2.011 / 1.108 |
+| Fallos inesperados / OOM | 0 / 0 | 0 / 0 | 0 / 0 |
+
+El máximo transitorio de cgroup se informa sin ocultarlo: `memory.max=268435456` bytes y swap usado 0 durante las tres corridas. No se elevó el presupuesto. Las dos instrumentadas terminaron con `memory.events.oom=0`, `oom_kill=0`, sin eventos Docker oom; las salidas die corresponden a SIGKILL de prueba y parada de limpieza. El guion original confirma `OOMKilled=false`, reinicio y éxito completo, sin disponer del desglose adicional.
+
+Con concurrencia 1/2 no hubo rechazo; con 8 hubo 50% de 429 previstos por admisión de cuatro transferencias. El p95 de subida a concurrencia 8 fue 1.616–1.826 ms; p95 health 111–124 ms, todas las respuestas de salud 200. Los abortos intencionales y 413 se contaron aparte, sin fallos inesperados. Este perfil incluye transferencias de 120 MiB, sobrescritura controlada, cancelaciones y tráfico pequeño; no representa toda carga comercial.
+
+RSS muestra calentamiento inicial, después pendientes próximas a cero o negativas a concurrencia 8 (original +0,053; A −0,002; B −0,343 MiB/min). En reposo las medianas finales fueron ~101,31 / 102,34 / 96,93 MiB. En A/B, heap mediano de ~15 MiB estable y external decreciente; los buffers no crecen con cada archivo. Esto explica el crecimiento observado en este horizonte y respalda estabilidad operacional de la corrección; no demuestra ausencia de fugas a días de duración.
+
+En las tres: archivo válido conserva SHA-256, incompleto devuelve 404, cero parciales tras reinicio y fuente intacta hasta teardown. Restauración en volumen distinto, copia corrupta rechazada, inventario exacto antes de invalidar sesiones, cookie anterior 401, nueva válida, empresa A 200 y acceso B 403. Helpers observados: pico cgroup máximo ~106,11 MiB, salida 0, sin OOM. La copia sigue dentro del runner: **no es una validación de backup externo al servidor**.
+
+CI del candidato: [PR 40222561490](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40222561490) y [push 40222558137](https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40222558137), correctos: Node 22/24, Chromium, build Docker, arranque/reinicio/health y carga corta. Los checks posteriores a este informe verifican el HEAD documental por separado; no se confunden con nuevas ejecuciones largas.
 
 Todos conservan 256 MiB/swap 0/1 CPU, mismas cuotas y límites 4/8/120 MiB. Se comprueban 413/429, salud, hashes, incompletos 404, cleanup tras SIGKILL/reinicio y restauración independiente con A/B y sesiones viejas 401. Un die por SIGKILL intencional no es OOM; el observador distingue eventos y flags.
 
@@ -72,3 +95,17 @@ Rollback de código solo en la rama de trabajo: revertir el sink/cambio del escr
 - Este informe y `docs/security/evidence/phase-05r-*.json`: resultados por SHA/run. La PR enlaza el HEAD y sus checks posteriores de documentación.
 
 El primer intento de construir el control con checkout superficial no tenía el objeto Git necesario: falló antes de la carga. Se corrigió con fetch del único commit revisado; ese fallo de harness no se cuenta como reproducción OOM. Los negativos originales se conservan como tales, no se convierten en aceptación verde.
+
+## Checklist y recomendación
+
+- [x] OOM anterior reproducido; controles negativos conservados, sin convertir fallos en éxito.
+- [x] Streaming con writeback acotado; regresiones y controles cortos correctos.
+- [x] Tres cargas prolongadas independientes a 256 MiB sin swap y una sola instancia por ejecución.
+- [x] Reinicio, integridad, aislamiento, revocación y restauración sintética verificados.
+- [x] Node 22/24, Chromium, Docker y npm audit sin vulnerabilidades conocidas.
+- [ ] Revisar PR #5 y cambios apilados antes de integrarlos en la rama de seguridad; PR #3 conserva su código anterior hasta esa revisión.
+- [ ] Autorizar por separado la creación de staging, con volumen/red/dominio/credenciales sintéticas exclusivos, TLS y una réplica.
+- [ ] En ese entorno autorizado, confirmar límite/swap efectivos, latencia de fdatasync del volumen real, cuotas/alertas de disco, backup externo y restauración independiente, sin producción.
+- [ ] Ampliar observación a horas/días antes de una apertura comercial; determinar capacidad con el perfil de uso real.
+
+**Recomendación:** la candidata supera la puerta de memoria para solicitar autorización de un staging aislado. No requiere ampliar RAM para este perfil probado. No implica autorizar su creación ni declarar lista producción: quedan la revisión, los requisitos de infraestructura y la validación del almacenamiento real. No se crea ni despliega ningún entorno con esta PR.
