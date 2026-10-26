@@ -52,6 +52,10 @@ jobs:
         run: node scripts/test-docker.mjs ruano-staging-check
       - name: Bounded synthetic file and concurrency resource tests
         run: node scripts/test-resources.mjs ruano-staging-check
+      - name: Short external-supervisor and real disk-full regressions
+        run: |
+          node scripts/test-supervisor.mjs ruano-staging-check
+          node scripts/test-supervisor-disk.mjs ruano-staging-check
       - name: Synthetic stability, disk growth and offline recovery (extended on marked push)
         env:
           SOAK_PHASE_SECONDS: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[staging-long]') && '300' || '60' }}
@@ -61,7 +65,10 @@ jobs:
         if: always()
         with:
           name: docker-synthetic-results
-          path: artifacts/*.json
+          path: |
+            artifacts/*.json
+            artifacts/supervisor-*/*.ndjson
+            artifacts/supervisor-*/*.json
 
 
   replay_synthetic_evidence:
