@@ -1,0 +1,161 @@
+{
+  "run": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40221834220",
+  "checkRun": 121254867993,
+  "annotations": [
+    {
+      "title": "Memory evidence",
+      "data": {
+        "samples": 177,
+        "durationMs": 182837,
+        "rssMax": 91607040,
+        "heapMax": 15636944,
+        "externalMax": 4330467,
+        "arrayBuffersMax": 546133,
+        "anonMax": 32419840,
+        "fileMax": 61440,
+        "dirtyMax": 12288,
+        "writebackMax": 0,
+        "sockMax": 12288,
+        "oomKillMax": 0
+      }
+    },
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 8,
+        "startedAt": 1792953370058,
+        "endedAt": 1792953431038,
+        "durationMs": 60980,
+        "batches": 61,
+        "requests": 488,
+        "statuses": {
+          "200": 488
+        },
+        "byTenant": {
+          "a": {},
+          "b": {}
+        },
+        "latencyMs": {
+          "p50": 2,
+          "p95": 4,
+          "p99": 5,
+          "max": 7
+        },
+        "health": {
+          "requests": 61,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 4
+        },
+        "sessionRotations": 7,
+        "intentionalCancellations": 0,
+        "oversizedRejected": 0,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 2,
+        "startedAt": 1792953309073,
+        "endedAt": 1792953370058,
+        "durationMs": 60985,
+        "batches": 61,
+        "requests": 122,
+        "statuses": {
+          "200": 122
+        },
+        "byTenant": {
+          "a": {},
+          "b": {}
+        },
+        "latencyMs": {
+          "p50": 2,
+          "p95": 2,
+          "p99": 4,
+          "max": 4
+        },
+        "health": {
+          "requests": 61,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 3
+        },
+        "sessionRotations": 7,
+        "intentionalCancellations": 0,
+        "oversizedRejected": 0,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 1,
+        "startedAt": 1792953248077,
+        "endedAt": 1792953309073,
+        "durationMs": 60996,
+        "batches": 61,
+        "requests": 61,
+        "statuses": {
+          "200": 61
+        },
+        "byTenant": {
+          "a": {},
+          "b": {}
+        },
+        "latencyMs": {
+          "p50": 2,
+          "p95": 2,
+          "p99": 4,
+          "max": 4
+        },
+        "health": {
+          "requests": 61,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 2
+        },
+        "sessionRotations": 7,
+        "intentionalCancellations": 0,
+        "oversizedRejected": 0,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Soak summary",
+      "data": {
+        "success": true,
+        "profile": {
+          "samples": 177,
+          "durationMs": 182837,
+          "peakCgroupBytes": 45621248,
+          "maxSampledRssBytes": 91607040,
+          "maxSampledAnonBytes": 32419840,
+          "startRssBytes": 85581824,
+          "endRssBytes": 91574272,
+          "swapMaxBytes": 0,
+          "cpuAveragePercent": 2.92619546371905,
+          "cpuP95Percent": 5.793694581280788,
+          "cpuMaxSampledPercent": 16.721294206170054
+        },
+        "interruption": {
+          "intentionalSigkill": true,
+          "partialObserved": true,
+          "oomKilled": false,
+          "oldValidFilePreserved": true,
+          "sha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "incompleteVideoStatus": 404,
+          "remainingPartials": 0,
+          "healthyAfterRestart": true
+        },
+        "image": {
+          "appId": "sha256:7eeae2e782ed733bc62e51aebc1ea10c2af2972b1aca8038074e9bd85c53623b",
+          "node22BaseDigest": "node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914"
+        }
+      }
+    }
+  ]
+}

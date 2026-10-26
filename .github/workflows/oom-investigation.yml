@@ -1,0 +1,110 @@
+name: Isolated OOM investigation
+on:
+  push:
+    branches: [security/phase-05r-oom]
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    if: contains(github.event.head_commit.message, '[oom-diagnose]') || contains(github.event.head_commit.message, '[oom-controls]') || contains(github.event.head_commit.message, '[oom-baseline]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: ${{ fromJSON(contains(github.event.head_commit.message, '[oom-baseline]') && '["baseline-uploads-only"]' || contains(github.event.head_commit.message, '[oom-controls]') && '["sessions","uploads-only"]' || '["original","legacy","host"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build with the phase 0.5 Node base
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          if [ "$MODE" = baseline-uploads-only ]; then
+            git fetch --no-tags --depth=1 origin 72d4853d5e955fc9239bbdf5a75a6373c42de21e
+            git show 72d4853:lib/binary-transfer.mjs > lib/binary-transfer.mjs
+          fi
+          docker pull node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
+          docker build --build-arg NODE_IMAGE=node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 -t ruano-staging-check .
+      - name: Reproduce configuration without accepting OOM as success
+        env:
+          MODE: ${{ matrix.mode }}
+          RUANO_BASE_REF: node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
+          SOAK_PHASE_SECONDS: 60
+          SOAK_IDLE_SECONDS: 0
+        run: |
+          if [ "$MODE" = original ]; then
+            node scripts/test-soak-phase05-original.mjs ruano-staging-check
+          elif [ "$MODE" = legacy ]; then
+            SOAK_MONITOR=legacy SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
+          else
+            SOAK_MONITOR=host SOAK_TRAFFIC="${MODE#baseline-}" SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oom-diagnostic-${{ matrix.mode }}
+          path: artifacts/*.json
+
+  acceptance:
+    if: contains(github.event.head_commit.message, '[oom-accept]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [original, host-a, host-b]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: |
+          docker pull node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
+          docker build --build-arg NODE_IMAGE=node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 -t ruano-staging-check .
+      - name: Fifteen-minute load plus two-minute idle, same 256 MiB without swap
+        env:
+          MODE: ${{ matrix.mode }}
+          SOAK_PHASE_SECONDS: 300
+          SOAK_IDLE_SECONDS: 120
+          RUANO_BASE_REF: node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
+        run: |
+          if [ "$MODE" = original ]; then
+            node scripts/test-soak-phase05-original.mjs ruano-staging-check
+          else
+            SOAK_MONITOR=host SOAK_DIAGNOSTICS=1 node scripts/test-soak.mjs ruano-staging-check
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oom-acceptance-${{ matrix.mode }}
+          path: artifacts/*.json
+  summarize_acceptance:
+    if: contains(github.event.head_commit.message, '[oom-results]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [original, host-a, host-b]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: oom-acceptance-${{ matrix.mode }}
+          path: accepted
+          run-id: 40222558069
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: node scripts/summarize-oom-profile.mjs accepted/soak-results.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oom-summary-${{ matrix.mode }}
+          path: artifacts/oom-profile-summary.json

@@ -1,0 +1,269 @@
+{
+  "run": 40222558069,
+  "commit": "8e93d857d4e0e2c932a3f78b5a60253f87e82780",
+  "job": 121257074431,
+  "annotations": [
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 8,
+        "startedAt": 1792954399230,
+        "endedAt": 1792954700132,
+        "durationMs": 300903,
+        "batches": 272,
+        "requests": 2176,
+        "statuses": {
+          "200": 1088,
+          "429": 1088
+        },
+        "byTenant": {
+          "a": {
+            "200": 544,
+            "429": 544
+          },
+          "b": {
+            "200": 544,
+            "429": 544
+          }
+        },
+        "latencyMs": {
+          "p50": 10,
+          "p95": 1826,
+          "p99": 1974,
+          "max": 2581
+        },
+        "health": {
+          "requests": 272,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 116
+        },
+        "intentionalCancellations": 55,
+        "oversizedRejected": 28,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 2,
+        "startedAt": 1792954098337,
+        "endedAt": 1792954399228,
+        "durationMs": 300891,
+        "batches": 299,
+        "requests": 598,
+        "statuses": {
+          "200": 598
+        },
+        "byTenant": {
+          "a": {
+            "200": 299
+          },
+          "b": {
+            "200": 299
+          }
+        },
+        "latencyMs": {
+          "p50": 7,
+          "p95": 980,
+          "p99": 1029,
+          "max": 1070
+        },
+        "health": {
+          "requests": 299,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 12
+        },
+        "intentionalCancellations": 60,
+        "oversizedRejected": 30,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 1,
+        "startedAt": 1792953797402,
+        "endedAt": 1792954098336,
+        "durationMs": 300934,
+        "batches": 301,
+        "requests": 301,
+        "statuses": {
+          "200": 301
+        },
+        "byTenant": {
+          "a": {
+            "200": 151
+          },
+          "b": {
+            "200": 150
+          }
+        },
+        "latencyMs": {
+          "p50": 6,
+          "p95": 534,
+          "p99": 675,
+          "max": 880
+        },
+        "health": {
+          "requests": 301,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 6
+        },
+        "intentionalCancellations": 61,
+        "oversizedRejected": 31,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Recovery analysis",
+      "data": {
+        "syntheticOnly": true,
+        "backupVerified": true,
+        "internalRestoreVerified": true,
+        "fileCount": 24,
+        "inventorySha256": "6f60fac138c909563e820fa50637e35bd3b84ee47ad02e64c5ddff50f210cf8b",
+        "backupAndInternalRestoreMs": 5280,
+        "sourceUnchanged": true,
+        "corruptBackupRejected": true,
+        "exactRestoreBeforeSessionReset": true,
+        "obsoleteSessionsArchived": true,
+        "restoreMs": 3426,
+        "oldCookieStatus": 401,
+        "newSessionsValid": true,
+        "tenantAFileStatus": 200,
+        "crossTenantStatus": 403,
+        "stableSha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+        "recoveryToReadyMs": 15758,
+        "sourceUnchangedUntilTeardown": true,
+        "newDistinctRestoreVolume": true,
+        "offServerBackupVerified": false
+      }
+    },
+    {
+      "title": "Storage analysis",
+      "data": {
+        "baseline": {
+          "allocatedBytes": 45056,
+          "tenantAAllocatedBytes": 0,
+          "tenantBAllocatedBytes": 0,
+          "freeBytes": 91492442112,
+          "files": 3,
+          "temporaries": 0
+        },
+        "afterLoad": {
+          "allocatedBytes": 253349888,
+          "tenantAAllocatedBytes": 126648320,
+          "tenantBAllocatedBytes": 126640128,
+          "freeBytes": 91238998016,
+          "files": 13,
+          "temporaries": 0
+        },
+        "maxAllocatedBytes": 504487936,
+        "maxTemporaries": 4,
+        "quotaEnforcedByApplication": false,
+        "volumeOptions": null,
+        "growthProbe": {
+          "newKeys": 10,
+          "payloadBytes": 2621440,
+          "allocatedDeltaBytes": 2662400,
+          "fileDelta": 10
+        }
+      }
+    },
+    {
+      "title": "RSS analysis",
+      "data": {
+        "phases": [
+          {
+            "concurrency": 1,
+            "samples": 284,
+            "durationMs": 299381,
+            "initialMedianBytes": 89792512,
+            "finalMedianBytes": 100225024,
+            "deltaMedianBytes": 10432512,
+            "slopeMiBPerMinute": 2.525729333190954,
+            "minBytes": 85561344,
+            "maxBytes": 102998016
+          },
+          {
+            "concurrency": 2,
+            "samples": 284,
+            "durationMs": 300416,
+            "initialMedianBytes": 100368384,
+            "finalMedianBytes": 100700160,
+            "deltaMedianBytes": 331776,
+            "slopeMiBPerMinute": 0.10826636810275445,
+            "minBytes": 97968128,
+            "maxBytes": 104599552
+          },
+          {
+            "concurrency": 8,
+            "samples": 281,
+            "durationMs": 299253,
+            "initialMedianBytes": 106569728,
+            "finalMedianBytes": 107020288,
+            "deltaMedianBytes": 450560,
+            "slopeMiBPerMinute": 0.05271429292381795,
+            "minBytes": 100605952,
+            "maxBytes": 135966720
+          }
+        ],
+        "idle": {
+          "startedAt": 1792954700135,
+          "endedAt": 1792954820252,
+          "healthChecks": 120,
+          "healthStatuses": [
+            200
+          ],
+          "samples": 114,
+          "durationMs": 119417,
+          "initialMedianBytes": 106299392,
+          "finalMedianBytes": 106229760,
+          "deltaMedianBytes": -69632,
+          "slopeMiBPerMinute": -0.02943140324591417,
+          "minBytes": 106229760,
+          "maxBytes": 106344448
+        }
+      }
+    },
+    {
+      "title": "Soak summary",
+      "data": {
+        "success": true,
+        "profile": {
+          "samples": 964,
+          "durationMs": 1022824,
+          "peakCgroupBytes": 272396288,
+          "maxSampledRssBytes": 135966720,
+          "maxSampledAnonBytes": 69414912,
+          "startRssBytes": 85331968,
+          "endRssBytes": 106229760,
+          "swapMaxBytes": 0,
+          "cpuAveragePercent": 18.198523597412652,
+          "cpuP95Percent": 79.07100760456274,
+          "cpuMaxSampledPercent": 104.72661016949152
+        },
+        "interruption": {
+          "intentionalSigkill": true,
+          "partialObserved": true,
+          "oomKilled": false,
+          "oldValidFilePreserved": true,
+          "sha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "incompleteVideoStatus": 404,
+          "remainingPartials": 0,
+          "healthyAfterRestart": true
+        },
+        "image": {
+          "appId": "sha256:17a885b155e7067712f998fd752daedcf05f0dd7d11a24215b50583dc5756659",
+          "node22BaseDigest": "node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914"
+        }
+      }
+    }
+  ]
+}

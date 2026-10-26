@@ -1,0 +1,152 @@
+{
+  "run": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40221280417",
+  "checkRun": 121253188707,
+  "annotations": [
+    {
+      "title": "Memory tail",
+      "data": {
+        "at": 1792953009259,
+        "process": {
+          "at": 1792953009088,
+          "rss": 96915456,
+          "heapTotal": 19259392,
+          "heapUsed": 14560880,
+          "external": 6522385,
+          "arrayBuffers": 2749032,
+          "uptimeSeconds": 186.637118471
+        },
+        "currentBytes": 52736000,
+        "stat": {
+          "anon": 30711808,
+          "file": 18382848,
+          "kernel": 3006464,
+          "kernel_stack": 212992,
+          "pagetables": 1536000,
+          "sec_pagetables": 0,
+          "percpu": 2544,
+          "sock": 0,
+          "vmalloc": 24576,
+          "shmem": 0,
+          "zswap": 0,
+          "zswapped": 0,
+          "file_mapped": 0,
+          "file_dirty": 4096,
+          "file_writeback": 0,
+          "swapcached": 0,
+          "anon_thp": 0,
+          "file_thp": 0,
+          "shmem_thp": 0,
+          "inactive_anon": 28147712,
+          "active_anon": 2506752,
+          "inactive_file": 18378752,
+          "active_file": 4096,
+          "unevictable": 0,
+          "slab_reclaimable": 708832,
+          "slab_unreclaimable": 506328,
+          "slab": 1215160,
+          "workingset_refault_anon": 0,
+          "workingset_refault_file": 6,
+          "workingset_activate_anon": 0,
+          "workingset_activate_file": 0,
+          "workingset_restore_anon": 0,
+          "workingset_restore_file": 0,
+          "workingset_nodereclaim": 0,
+          "pgdemote_kswapd": 0,
+          "pgdemote_direct": 0,
+          "pgdemote_khugepaged": 0,
+          "pgdemote_proactive": 0,
+          "pgpromote_success": 0,
+          "pgscan": 471253,
+          "pgsteal": 471245,
+          "pswpin": 0,
+          "pswpout": 0,
+          "pgscan_kswapd": 0,
+          "pgscan_direct": 471253,
+          "pgscan_khugepaged": 0,
+          "pgscan_proactive": 0,
+          "pgsteal_kswapd": 0,
+          "pgsteal_direct": 471245,
+          "pgsteal_khugepaged": 0,
+          "pgsteal_proactive": 0,
+          "pgfault": 2072935,
+          "pgmajfault": 0,
+          "pgrefill": 292908,
+          "pgactivate": 8,
+          "pgdeactivate": 0,
+          "pglazyfree": 0,
+          "pglazyfreed": 0,
+          "swpin_zero": 0,
+          "swpout_zero": 0,
+          "zswpin": 0,
+          "zswpout": 0,
+          "zswpwb": 0,
+          "thp_fault_alloc": 949,
+          "thp_collapse_alloc": 0,
+          "thp_swpout": 0,
+          "thp_swpout_fallback": 0,
+          "numa_pages_migrated": 0,
+          "numa_pte_updates": 0,
+          "numa_hint_faults": 0
+        },
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 9828,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      }
+    },
+    {
+      "title": "Memory evidence",
+      "data": {
+        "samples": 159,
+        "durationMs": 180820,
+        "rssMax": 133758976,
+        "heapMax": 14966440,
+        "externalMax": 38685249,
+        "arrayBuffersMax": 34911896,
+        "anonMax": 67485696,
+        "fileMax": 215977984,
+        "dirtyMax": 125833216,
+        "writebackMax": 68812800,
+        "sockMax": 10907648,
+        "oomKillMax": 0
+      }
+    },
+    {
+      "title": "Soak summary",
+      "data": {
+        "success": true,
+        "profile": {
+          "samples": 159,
+          "durationMs": 180820,
+          "peakCgroupBytes": 269348864,
+          "maxSampledRssBytes": 133758976,
+          "maxSampledAnonBytes": 67485696,
+          "startRssBytes": 85524480,
+          "endRssBytes": 97005568,
+          "swapMaxBytes": 0,
+          "cpuAveragePercent": 26.74177635217343,
+          "cpuP95Percent": 92.27139622641509,
+          "cpuMaxSampledPercent": 110.64943625325239
+        },
+        "interruption": {
+          "intentionalSigkill": true,
+          "partialObserved": true,
+          "oomKilled": false,
+          "oldValidFilePreserved": true,
+          "sha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "incompleteVideoStatus": 404,
+          "remainingPartials": 0,
+          "healthyAfterRestart": true
+        },
+        "image": {
+          "appId": "sha256:4d305cc8313acd2b63a8d1ac234efedd72d9d023a6d39fc3cf7963f0c4f7238d",
+          "node22BaseDigest": "node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914"
+        }
+      }
+    }
+  ]
+}

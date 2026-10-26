@@ -1,0 +1,506 @@
+{
+  "sourceRun": 40222558069,
+  "summaryRun": 40298625350,
+  "annotations": [
+    {
+      "title": "Acceptance recovery",
+      "data": {
+        "recovery": {
+          "syntheticOnly": true,
+          "backupVerified": true,
+          "internalRestoreVerified": true,
+          "fileCount": 25,
+          "inventorySha256": "5d510b59e850326adbaabbd97b8d330cc8f4478823ee11fc62f21276c29ee824",
+          "backupAndInternalRestoreMs": 778,
+          "sourceUnchanged": true,
+          "corruptBackupRejected": true,
+          "exactRestoreBeforeSessionReset": true,
+          "obsoleteSessionsArchived": true,
+          "restoreMs": 405,
+          "oldCookieStatus": 401,
+          "newSessionsValid": true,
+          "tenantAFileStatus": 200,
+          "crossTenantStatus": 403,
+          "stableSha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "recoveryToReadyMs": 7799,
+          "sourceUnchangedUntilTeardown": true,
+          "newDistinctRestoreVolume": true,
+          "offServerBackupVerified": false
+        },
+        "memory": [
+          {
+            "tool": 1,
+            "oomKilled": false,
+            "exitCode": 0,
+            "samples": 3,
+            "rssMax": 79355904,
+            "heapMax": 6601520,
+            "externalMax": 17074500,
+            "arrayBuffersMax": 15036574,
+            "peakCgroupBytes": 111263744,
+            "dirtyMax": 8192
+          },
+          {
+            "tool": 2,
+            "oomKilled": false,
+            "exitCode": 0,
+            "samples": 2,
+            "rssMax": 66998272,
+            "heapMax": 6272456,
+            "externalMax": 13340186,
+            "arrayBuffersMax": 11302260,
+            "peakCgroupBytes": 72609792,
+            "dirtyMax": 4096
+          }
+        ]
+      }
+    },
+    {
+      "title": "Acceptance idle",
+      "data": {
+        "startedAt": 1792954700748,
+        "endedAt": 1792954820900,
+        "healthChecks": 120,
+        "healthStatuses": [
+          200
+        ],
+        "samples": 116,
+        "durationMs": 118705,
+        "initialMedianBytes": 101638144,
+        "finalMedianBytes": 101634048,
+        "deltaMedianBytes": -4096,
+        "slopeMiBPerMinute": -0.43748463998109355,
+        "minBytes": 101621760,
+        "maxBytes": 103608320,
+        "metrics": {
+          "rss": {
+            "samples": 116,
+            "durationMs": 118705,
+            "initialMedianBytes": 101638144,
+            "finalMedianBytes": 101634048,
+            "deltaMedianBytes": -4096,
+            "slopeMiBPerMinute": -0.43748463998109355,
+            "minBytes": 101621760,
+            "maxBytes": 103608320
+          },
+          "heapUsed": {
+            "samples": 116,
+            "durationMs": 118705,
+            "initialMedianBytes": 15676616,
+            "finalMedianBytes": 15683728,
+            "deltaMedianBytes": 7112,
+            "slopeMiBPerMinute": 0.029746962729065653,
+            "minBytes": 15184464,
+            "maxBytes": 15998008
+          },
+          "external": {
+            "samples": 116,
+            "durationMs": 118705,
+            "initialMedianBytes": 9244803,
+            "finalMedianBytes": 6733310,
+            "deltaMedianBytes": -2511493,
+            "slopeMiBPerMinute": -1.562315807550052,
+            "minBytes": 6733310,
+            "maxBytes": 9244803
+          },
+          "arrayBuffers": {
+            "samples": 116,
+            "durationMs": 118705,
+            "initialMedianBytes": 2959957,
+            "finalMedianBytes": 2959957,
+            "deltaMedianBytes": 0,
+            "slopeMiBPerMinute": -0.5661603022366015,
+            "minBytes": 2959957,
+            "maxBytes": 5471450
+          }
+        }
+      }
+    },
+    {
+      "title": "Acceptance phase",
+      "data": {
+        "concurrency": 8,
+        "durationMs": 300871,
+        "requests": 2216,
+        "statuses": {
+          "200": 1108,
+          "429": 1108
+        },
+        "health": {
+          "requests": 277,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 124
+        },
+        "latencyMs": {
+          "p50": 11,
+          "p95": 1616,
+          "p99": 1810,
+          "max": 2204
+        },
+        "sessionRotations": 0,
+        "metrics": {
+          "rss": {
+            "samples": 291,
+            "durationMs": 299723,
+            "initialMedianBytes": 110444544,
+            "finalMedianBytes": 104968192,
+            "deltaMedianBytes": -5476352,
+            "slopeMiBPerMinute": -0.34329224745890224,
+            "minBytes": 100065280,
+            "maxBytes": 134983680
+          },
+          "heapUsed": {
+            "samples": 291,
+            "durationMs": 299723,
+            "initialMedianBytes": 15084792,
+            "finalMedianBytes": 15638096,
+            "deltaMedianBytes": 553304,
+            "slopeMiBPerMinute": 0.11038337288563911,
+            "minBytes": 14707816,
+            "maxBytes": 16238992
+          },
+          "external": {
+            "samples": 291,
+            "durationMs": 299723,
+            "initialMedianBytes": 14028844,
+            "finalMedianBytes": 10023711,
+            "deltaMedianBytes": -4005133,
+            "slopeMiBPerMinute": -0.426455196934136,
+            "minBytes": 5668311,
+            "maxBytes": 37065370
+          },
+          "arrayBuffers": {
+            "samples": 291,
+            "durationMs": 299723,
+            "initialMedianBytes": 10255491,
+            "finalMedianBytes": 5781156,
+            "deltaMedianBytes": -4474335,
+            "slopeMiBPerMinute": -0.42211904913877724,
+            "minBytes": 1894958,
+            "maxBytes": 33292017
+          }
+        }
+      }
+    },
+    {
+      "title": "Acceptance phase",
+      "data": {
+        "concurrency": 2,
+        "durationMs": 300930,
+        "requests": 602,
+        "statuses": {
+          "200": 602
+        },
+        "health": {
+          "requests": 301,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 11
+        },
+        "latencyMs": {
+          "p50": 7,
+          "p95": 864,
+          "p99": 893,
+          "max": 918
+        },
+        "sessionRotations": 0,
+        "metrics": {
+          "rss": {
+            "samples": 292,
+            "durationMs": 300247,
+            "initialMedianBytes": 97021952,
+            "finalMedianBytes": 99536896,
+            "deltaMedianBytes": 2514944,
+            "slopeMiBPerMinute": 0.4026511634226982,
+            "minBytes": 94474240,
+            "maxBytes": 104603648
+          },
+          "heapUsed": {
+            "samples": 292,
+            "durationMs": 300247,
+            "initialMedianBytes": 17704000,
+            "finalMedianBytes": 16997168,
+            "deltaMedianBytes": -706832,
+            "slopeMiBPerMinute": -0.30457255405090555,
+            "minBytes": 14676336,
+            "maxBytes": 18989216
+          },
+          "external": {
+            "samples": 292,
+            "durationMs": 300247,
+            "initialMedianBytes": 6134361,
+            "finalMedianBytes": 7699747,
+            "deltaMedianBytes": 1565386,
+            "slopeMiBPerMinute": 0.1713469496231154,
+            "minBytes": 4350657,
+            "maxBytes": 11774668
+          },
+          "arrayBuffers": {
+            "samples": 292,
+            "durationMs": 300247,
+            "initialMedianBytes": 2355213,
+            "finalMedianBytes": 2760415,
+            "deltaMedianBytes": 405202,
+            "slopeMiBPerMinute": 0.10564559999230329,
+            "minBytes": 571509,
+            "maxBytes": 7999939
+          }
+        }
+      }
+    },
+    {
+      "title": "Acceptance phase",
+      "data": {
+        "concurrency": 1,
+        "durationMs": 300936,
+        "requests": 301,
+        "statuses": {
+          "200": 301
+        },
+        "health": {
+          "requests": 301,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 6
+        },
+        "latencyMs": {
+          "p50": 7,
+          "p95": 469,
+          "p99": 512,
+          "max": 728
+        },
+        "sessionRotations": 0,
+        "metrics": {
+          "rss": {
+            "samples": 291,
+            "durationMs": 299286,
+            "initialMedianBytes": 89350144,
+            "finalMedianBytes": 96473088,
+            "deltaMedianBytes": 7122944,
+            "slopeMiBPerMinute": 1.3969739865675768,
+            "minBytes": 86913024,
+            "maxBytes": 99139584
+          },
+          "heapUsed": {
+            "samples": 291,
+            "durationMs": 299286,
+            "initialMedianBytes": 15877904,
+            "finalMedianBytes": 16782656,
+            "deltaMedianBytes": 904752,
+            "slopeMiBPerMinute": 0.20240327010231843,
+            "minBytes": 14733616,
+            "maxBytes": 17626352
+          },
+          "external": {
+            "samples": 291,
+            "durationMs": 299286,
+            "initialMedianBytes": 6472801,
+            "finalMedianBytes": 6802335,
+            "deltaMedianBytes": 329534,
+            "slopeMiBPerMinute": -0.1120011743696223,
+            "minBytes": 4293337,
+            "maxBytes": 10208887
+          },
+          "arrayBuffers": {
+            "samples": 291,
+            "durationMs": 299286,
+            "initialMedianBytes": 2443826,
+            "finalMedianBytes": 2758227,
+            "deltaMedianBytes": 314401,
+            "slopeMiBPerMinute": -0.10272261545179168,
+            "minBytes": 514189,
+            "maxBytes": 6429739
+          }
+        }
+      }
+    },
+    {
+      "title": "Acceptance minute series",
+      "data": [
+        {
+          "minute": 0,
+          "rssMedianMiB": 85.17,
+          "heapMedianMiB": 15.11,
+          "externalMedianMiB": 6.04,
+          "dirtyMaxMiB": 2.76
+        },
+        {
+          "minute": 1,
+          "rssMedianMiB": 91.22,
+          "heapMedianMiB": 15.92,
+          "externalMedianMiB": 6.58,
+          "dirtyMaxMiB": 3.14
+        },
+        {
+          "minute": 2,
+          "rssMedianMiB": 90.81,
+          "heapMedianMiB": 15.71,
+          "externalMedianMiB": 5.75,
+          "dirtyMaxMiB": 1.53
+        },
+        {
+          "minute": 3,
+          "rssMedianMiB": 90.7,
+          "heapMedianMiB": 16.17,
+          "externalMedianMiB": 5.84,
+          "dirtyMaxMiB": 3.32
+        },
+        {
+          "minute": 4,
+          "rssMedianMiB": 92,
+          "heapMedianMiB": 16.01,
+          "externalMedianMiB": 6.54,
+          "dirtyMaxMiB": 3.81
+        },
+        {
+          "minute": 5,
+          "rssMedianMiB": 92.53,
+          "heapMedianMiB": 16.89,
+          "externalMedianMiB": 5.71,
+          "dirtyMaxMiB": 6.63
+        },
+        {
+          "minute": 6,
+          "rssMedianMiB": 95.2,
+          "heapMedianMiB": 16.22,
+          "externalMedianMiB": 7.57,
+          "dirtyMaxMiB": 4.32
+        },
+        {
+          "minute": 7,
+          "rssMedianMiB": 96.02,
+          "heapMedianMiB": 17.18,
+          "externalMedianMiB": 7.84,
+          "dirtyMaxMiB": 6.45
+        },
+        {
+          "minute": 8,
+          "rssMedianMiB": 95.4,
+          "heapMedianMiB": 15.33,
+          "externalMedianMiB": 7.09,
+          "dirtyMaxMiB": 6.98
+        },
+        {
+          "minute": 9,
+          "rssMedianMiB": 94.93,
+          "heapMedianMiB": 16.22,
+          "externalMedianMiB": 7.36,
+          "dirtyMaxMiB": 7.88
+        },
+        {
+          "minute": 10,
+          "rssMedianMiB": 105.32,
+          "heapMedianMiB": 14.4,
+          "externalMedianMiB": 12.8,
+          "dirtyMaxMiB": 9.26
+        },
+        {
+          "minute": 11,
+          "rssMedianMiB": 100.99,
+          "heapMedianMiB": 14.73,
+          "externalMedianMiB": 10.06,
+          "dirtyMaxMiB": 13.95
+        },
+        {
+          "minute": 12,
+          "rssMedianMiB": 99.26,
+          "heapMedianMiB": 14.79,
+          "externalMedianMiB": 8.73,
+          "dirtyMaxMiB": 12.82
+        },
+        {
+          "minute": 13,
+          "rssMedianMiB": 100.63,
+          "heapMedianMiB": 14.86,
+          "externalMedianMiB": 9.05,
+          "dirtyMaxMiB": 12.06
+        },
+        {
+          "minute": 14,
+          "rssMedianMiB": 100.25,
+          "heapMedianMiB": 14.91,
+          "externalMedianMiB": 9.56,
+          "dirtyMaxMiB": 11.3
+        },
+        {
+          "minute": 15,
+          "rssMedianMiB": 96.93,
+          "heapMedianMiB": 14.87,
+          "externalMedianMiB": 8.82,
+          "dirtyMaxMiB": 0.01
+        },
+        {
+          "minute": 16,
+          "rssMedianMiB": 96.93,
+          "heapMedianMiB": 14.9,
+          "externalMedianMiB": 6.42,
+          "dirtyMaxMiB": 0
+        },
+        {
+          "minute": 17,
+          "rssMedianMiB": 96.93,
+          "heapMedianMiB": 15.18,
+          "externalMedianMiB": 6.42,
+          "dirtyMaxMiB": 0
+        }
+      ]
+    },
+    {
+      "title": "Acceptance summary",
+      "data": {
+        "success": true,
+        "profile": {
+          "samples": 991,
+          "durationMs": 1022186,
+          "peakCgroupBytes": 269819904,
+          "maxSampledRssBytes": 134983680,
+          "maxSampledAnonBytes": 68993024,
+          "startRssBytes": 85450752,
+          "endRssBytes": 101634048,
+          "swapMaxBytes": 0,
+          "cpuAveragePercent": 14.471659169661882,
+          "cpuP95Percent": 79.12837606837607,
+          "cpuMaxSampledPercent": 107.59488188976378
+        },
+        "memoryEvidence": {
+          "samples": 991,
+          "durationMs": 1022186,
+          "rssMax": 134983680,
+          "heapMax": 18989216,
+          "externalMax": 37065370,
+          "arrayBuffersMax": 33292017,
+          "anonMax": 68993024,
+          "fileMax": 223608832,
+          "dirtyMax": 14622720,
+          "writebackMax": 12582912,
+          "sockMax": 32129024,
+          "oomKillMax": 0
+        },
+        "dockerEvents": [
+          {
+            "action": "die",
+            "atUnixNs": "1792954821810365084"
+          },
+          {
+            "action": "die",
+            "atUnixNs": "1792954838294279338"
+          }
+        ],
+        "interruption": {
+          "intentionalSigkill": true,
+          "partialObserved": true,
+          "oomKilled": false,
+          "oldValidFilePreserved": true,
+          "sha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "incompleteVideoStatus": 404,
+          "remainingPartials": 0,
+          "healthyAfterRestart": true
+        }
+      }
+    }
+  ]
+}

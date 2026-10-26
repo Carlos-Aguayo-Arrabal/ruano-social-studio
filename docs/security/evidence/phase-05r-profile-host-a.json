@@ -1,0 +1,506 @@
+{
+  "sourceRun": 40222558069,
+  "summaryRun": 40298625350,
+  "annotations": [
+    {
+      "title": "Acceptance recovery",
+      "data": {
+        "recovery": {
+          "syntheticOnly": true,
+          "backupVerified": true,
+          "internalRestoreVerified": true,
+          "fileCount": 25,
+          "inventorySha256": "10567069cfcf6a1d3fef249a869e9de42f70d1c747f9a64ad27e309f202e20ec",
+          "backupAndInternalRestoreMs": 546,
+          "sourceUnchanged": true,
+          "corruptBackupRejected": true,
+          "exactRestoreBeforeSessionReset": true,
+          "obsoleteSessionsArchived": true,
+          "restoreMs": 342,
+          "oldCookieStatus": 401,
+          "newSessionsValid": true,
+          "tenantAFileStatus": 200,
+          "crossTenantStatus": 403,
+          "stableSha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "recoveryToReadyMs": 7546,
+          "sourceUnchangedUntilTeardown": true,
+          "newDistinctRestoreVolume": true,
+          "offServerBackupVerified": false
+        },
+        "memory": [
+          {
+            "tool": 1,
+            "oomKilled": false,
+            "exitCode": 0,
+            "samples": 2,
+            "rssMax": 72785920,
+            "heapMax": 6243120,
+            "externalMax": 9940736,
+            "arrayBuffersMax": 7902810,
+            "peakCgroupBytes": 65081344,
+            "dirtyMax": 8192
+          },
+          {
+            "tool": 2,
+            "oomKilled": false,
+            "exitCode": 0,
+            "samples": 1,
+            "rssMax": 70377472,
+            "heapMax": 4678592,
+            "externalMax": 1804757,
+            "arrayBuffersMax": 12662,
+            "peakCgroupBytes": 42246144,
+            "dirtyMax": 4096
+          }
+        ]
+      }
+    },
+    {
+      "title": "Acceptance idle",
+      "data": {
+        "startedAt": 1792954700031,
+        "endedAt": 1792954820199,
+        "healthChecks": 120,
+        "healthStatuses": [
+          200
+        ],
+        "samples": 116,
+        "durationMs": 119201,
+        "initialMedianBytes": 107311104,
+        "finalMedianBytes": 107311104,
+        "deltaMedianBytes": 0,
+        "slopeMiBPerMinute": -0.04343123235354997,
+        "minBytes": 107311104,
+        "maxBytes": 107454464,
+        "metrics": {
+          "rss": {
+            "samples": 116,
+            "durationMs": 119201,
+            "initialMedianBytes": 107311104,
+            "finalMedianBytes": 107311104,
+            "deltaMedianBytes": 0,
+            "slopeMiBPerMinute": -0.04343123235354997,
+            "minBytes": 107311104,
+            "maxBytes": 107454464
+          },
+          "heapUsed": {
+            "samples": 116,
+            "durationMs": 119201,
+            "initialMedianBytes": 15893584,
+            "finalMedianBytes": 15876504,
+            "deltaMedianBytes": -17080,
+            "slopeMiBPerMinute": 0.0038485331544353355,
+            "minBytes": 15421152,
+            "maxBytes": 16249128
+          },
+          "external": {
+            "samples": 116,
+            "durationMs": 119201,
+            "initialMedianBytes": 8448256,
+            "finalMedianBytes": 7389280,
+            "deltaMedianBytes": -1058976,
+            "slopeMiBPerMinute": -0.6988597073815662,
+            "minBytes": 7389280,
+            "maxBytes": 8448256
+          },
+          "arrayBuffers": {
+            "samples": 116,
+            "durationMs": 119201,
+            "initialMedianBytes": 3615927,
+            "finalMedianBytes": 3615927,
+            "deltaMedianBytes": 0,
+            "slopeMiBPerMinute": -0.32081914559732777,
+            "minBytes": 3615927,
+            "maxBytes": 4674903
+          }
+        }
+      }
+    },
+    {
+      "title": "Acceptance phase",
+      "data": {
+        "concurrency": 8,
+        "durationMs": 300543,
+        "requests": 2152,
+        "statuses": {
+          "200": 1076,
+          "429": 1076
+        },
+        "health": {
+          "requests": 269,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 111
+        },
+        "latencyMs": {
+          "p50": 12,
+          "p95": 1819,
+          "p99": 2198,
+          "max": 2525
+        },
+        "sessionRotations": 0,
+        "metrics": {
+          "rss": {
+            "samples": 288,
+            "durationMs": 298659,
+            "initialMedianBytes": 107479040,
+            "finalMedianBytes": 108531712,
+            "deltaMedianBytes": 1052672,
+            "slopeMiBPerMinute": -0.0015260747112462,
+            "minBytes": 102375424,
+            "maxBytes": 135053312
+          },
+          "heapUsed": {
+            "samples": 288,
+            "durationMs": 298659,
+            "initialMedianBytes": 15157024,
+            "finalMedianBytes": 15740104,
+            "deltaMedianBytes": 583080,
+            "slopeMiBPerMinute": 0.11380592651743753,
+            "minBytes": 14712968,
+            "maxBytes": 16199432
+          },
+          "external": {
+            "samples": 288,
+            "durationMs": 298659,
+            "initialMedianBytes": 11796719,
+            "finalMedianBytes": 10750721,
+            "deltaMedianBytes": -1045998,
+            "slopeMiBPerMinute": -0.15939654471087145,
+            "minBytes": 5603321,
+            "maxBytes": 33934078
+          },
+          "arrayBuffers": {
+            "samples": 288,
+            "durationMs": 298659,
+            "initialMedianBytes": 8023366,
+            "finalMedianBytes": 6977368,
+            "deltaMedianBytes": -1045998,
+            "slopeMiBPerMinute": -0.10313911965255479,
+            "minBytes": 1829968,
+            "maxBytes": 29248852
+          }
+        }
+      }
+    },
+    {
+      "title": "Acceptance phase",
+      "data": {
+        "concurrency": 2,
+        "durationMs": 300134,
+        "requests": 594,
+        "statuses": {
+          "200": 594
+        },
+        "health": {
+          "requests": 297,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 13
+        },
+        "latencyMs": {
+          "p50": 7,
+          "p95": 1019,
+          "p99": 1065,
+          "max": 1201
+        },
+        "sessionRotations": 0,
+        "metrics": {
+          "rss": {
+            "samples": 290,
+            "durationMs": 299828,
+            "initialMedianBytes": 101240832,
+            "finalMedianBytes": 104656896,
+            "deltaMedianBytes": 3416064,
+            "slopeMiBPerMinute": 0.8443653921775598,
+            "minBytes": 98336768,
+            "maxBytes": 109498368
+          },
+          "heapUsed": {
+            "samples": 290,
+            "durationMs": 299828,
+            "initialMedianBytes": 17637008,
+            "finalMedianBytes": 16794176,
+            "deltaMedianBytes": -842832,
+            "slopeMiBPerMinute": -0.30862772947032047,
+            "minBytes": 14726424,
+            "maxBytes": 18688888
+          },
+          "external": {
+            "samples": 290,
+            "durationMs": 299828,
+            "initialMedianBytes": 6695607,
+            "finalMedianBytes": 8053710,
+            "deltaMedianBytes": 1358103,
+            "slopeMiBPerMinute": 0.2984622903351604,
+            "minBytes": 4796425,
+            "maxBytes": 11701570
+          },
+          "arrayBuffers": {
+            "samples": 290,
+            "durationMs": 299828,
+            "initialMedianBytes": 2661283,
+            "finalMedianBytes": 3726438,
+            "deltaMedianBytes": 1065155,
+            "slopeMiBPerMinute": 0.3053411645247325,
+            "minBytes": 546533,
+            "maxBytes": 7922422
+          }
+        }
+      }
+    },
+    {
+      "title": "Acceptance phase",
+      "data": {
+        "concurrency": 1,
+        "durationMs": 300927,
+        "requests": 301,
+        "statuses": {
+          "200": 301
+        },
+        "health": {
+          "requests": 301,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 6
+        },
+        "latencyMs": {
+          "p50": 6,
+          "p95": 561,
+          "p99": 636,
+          "max": 931
+        },
+        "sessionRotations": 0,
+        "metrics": {
+          "rss": {
+            "samples": 290,
+            "durationMs": 299073,
+            "initialMedianBytes": 91959296,
+            "finalMedianBytes": 98873344,
+            "deltaMedianBytes": 6914048,
+            "slopeMiBPerMinute": 1.5204919440851723,
+            "minBytes": 89448448,
+            "maxBytes": 102297600
+          },
+          "heapUsed": {
+            "samples": 290,
+            "durationMs": 299073,
+            "initialMedianBytes": 15950872,
+            "finalMedianBytes": 16814952,
+            "deltaMedianBytes": 864080,
+            "slopeMiBPerMinute": 0.19498225035002217,
+            "minBytes": 15207056,
+            "maxBytes": 17684456
+          },
+          "external": {
+            "samples": 290,
+            "durationMs": 299073,
+            "initialMedianBytes": 7003705,
+            "finalMedianBytes": 6625649,
+            "deltaMedianBytes": -378056,
+            "slopeMiBPerMinute": -0.1342284223820081,
+            "minBytes": 4292513,
+            "maxBytes": 9915391
+          },
+          "arrayBuffers": {
+            "samples": 290,
+            "durationMs": 299073,
+            "initialMedianBytes": 2491085,
+            "finalMedianBytes": 2846501,
+            "deltaMedianBytes": 355416,
+            "slopeMiBPerMinute": -0.08318322904127991,
+            "minBytes": 513365,
+            "maxBytes": 5403221
+          }
+        }
+      }
+    },
+    {
+      "title": "Acceptance minute series",
+      "data": [
+        {
+          "minute": 0,
+          "rssMedianMiB": 87.7,
+          "heapMedianMiB": 15.21,
+          "externalMedianMiB": 6.66,
+          "dirtyMaxMiB": 3.7
+        },
+        {
+          "minute": 1,
+          "rssMedianMiB": 93.56,
+          "heapMedianMiB": 15.93,
+          "externalMedianMiB": 6.31,
+          "dirtyMaxMiB": 1.93
+        },
+        {
+          "minute": 2,
+          "rssMedianMiB": 93.76,
+          "heapMedianMiB": 15.77,
+          "externalMedianMiB": 6.17,
+          "dirtyMaxMiB": 1.66
+        },
+        {
+          "minute": 3,
+          "rssMedianMiB": 93.32,
+          "heapMedianMiB": 16.13,
+          "externalMedianMiB": 5.74,
+          "dirtyMaxMiB": 3.95
+        },
+        {
+          "minute": 4,
+          "rssMedianMiB": 94.29,
+          "heapMedianMiB": 16.04,
+          "externalMedianMiB": 6.32,
+          "dirtyMaxMiB": 3.88
+        },
+        {
+          "minute": 5,
+          "rssMedianMiB": 96.56,
+          "heapMedianMiB": 16.86,
+          "externalMedianMiB": 6.62,
+          "dirtyMaxMiB": 6.61
+        },
+        {
+          "minute": 6,
+          "rssMedianMiB": 98.07,
+          "heapMedianMiB": 16.31,
+          "externalMedianMiB": 7.24,
+          "dirtyMaxMiB": 6.32
+        },
+        {
+          "minute": 7,
+          "rssMedianMiB": 98.3,
+          "heapMedianMiB": 17.05,
+          "externalMedianMiB": 6.85,
+          "dirtyMaxMiB": 7.14
+        },
+        {
+          "minute": 8,
+          "rssMedianMiB": 100.44,
+          "heapMedianMiB": 15.3,
+          "externalMedianMiB": 7.28,
+          "dirtyMaxMiB": 7.07
+        },
+        {
+          "minute": 9,
+          "rssMedianMiB": 99.84,
+          "heapMedianMiB": 16.04,
+          "externalMedianMiB": 7.38,
+          "dirtyMaxMiB": 6.57
+        },
+        {
+          "minute": 10,
+          "rssMedianMiB": 102.13,
+          "heapMedianMiB": 14.47,
+          "externalMedianMiB": 9.86,
+          "dirtyMaxMiB": 15.27
+        },
+        {
+          "minute": 11,
+          "rssMedianMiB": 103.27,
+          "heapMedianMiB": 14.71,
+          "externalMedianMiB": 10.63,
+          "dirtyMaxMiB": 14.98
+        },
+        {
+          "minute": 12,
+          "rssMedianMiB": 106.23,
+          "heapMedianMiB": 14.79,
+          "externalMedianMiB": 11.61,
+          "dirtyMaxMiB": 11.45
+        },
+        {
+          "minute": 13,
+          "rssMedianMiB": 104.39,
+          "heapMedianMiB": 14.83,
+          "externalMedianMiB": 10.63,
+          "dirtyMaxMiB": 11.88
+        },
+        {
+          "minute": 14,
+          "rssMedianMiB": 103.5,
+          "heapMedianMiB": 15.01,
+          "externalMedianMiB": 10.25,
+          "dirtyMaxMiB": 13.39
+        },
+        {
+          "minute": 15,
+          "rssMedianMiB": 102.34,
+          "heapMedianMiB": 15.09,
+          "externalMedianMiB": 8.06,
+          "dirtyMaxMiB": 0.02
+        },
+        {
+          "minute": 16,
+          "rssMedianMiB": 102.34,
+          "heapMedianMiB": 15.14,
+          "externalMedianMiB": 7.05,
+          "dirtyMaxMiB": 0
+        },
+        {
+          "minute": 17,
+          "rssMedianMiB": 102.34,
+          "heapMedianMiB": 15.32,
+          "externalMedianMiB": 7.05,
+          "dirtyMaxMiB": 0
+        }
+      ]
+    },
+    {
+      "title": "Acceptance summary",
+      "data": {
+        "success": true,
+        "profile": {
+          "samples": 985,
+          "durationMs": 1021455,
+          "peakCgroupBytes": 273928192,
+          "maxSampledRssBytes": 135053312,
+          "maxSampledAnonBytes": 68816896,
+          "startRssBytes": 87633920,
+          "endRssBytes": 107311104,
+          "swapMaxBytes": 0,
+          "cpuAveragePercent": 16.484605978726425,
+          "cpuP95Percent": 83.33365758754864,
+          "cpuMaxSampledPercent": 102.34814540059347
+        },
+        "memoryEvidence": {
+          "samples": 985,
+          "durationMs": 1021455,
+          "rssMax": 135053312,
+          "heapMax": 18688888,
+          "externalMax": 33934078,
+          "arrayBuffersMax": 29248852,
+          "anonMax": 68816896,
+          "fileMax": 221863936,
+          "dirtyMax": 16011264,
+          "writebackMax": 12582912,
+          "sockMax": 15384576,
+          "oomKillMax": 0
+        },
+        "dockerEvents": [
+          {
+            "action": "die",
+            "atUnixNs": "1792954821435400148"
+          },
+          {
+            "action": "die",
+            "atUnixNs": "1792954838108771854"
+          }
+        ],
+        "interruption": {
+          "intentionalSigkill": true,
+          "partialObserved": true,
+          "oomKilled": false,
+          "oldValidFilePreserved": true,
+          "sha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "incompleteVideoStatus": 404,
+          "remainingPartials": 0,
+          "healthyAfterRestart": true
+        }
+      }
+    }
+  ]
+}
