@@ -81,3 +81,30 @@ jobs:
         with:
           name: oom-acceptance-${{ matrix.mode }}
           path: artifacts/*.json
+  summarize_acceptance:
+    if: contains(github.event.head_commit.message, '[oom-results]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [original, host-a, host-b]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: oom-acceptance-${{ matrix.mode }}
+          path: accepted
+          run-id: 40222558069
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: node scripts/summarize-oom-profile.mjs accepted/soak-results.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oom-summary-${{ matrix.mode }}
+          path: artifacts/oom-profile-summary.json

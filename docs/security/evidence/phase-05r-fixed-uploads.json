@@ -1,0 +1,176 @@
+{
+  "run": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40221834220",
+  "checkRun": 121254868392,
+  "annotations": [
+    {
+      "title": "Memory evidence",
+      "data": {
+        "samples": 176,
+        "durationMs": 182674,
+        "rssMax": 124678144,
+        "heapMax": 17570680,
+        "externalMax": 29610410,
+        "arrayBuffersMax": 25837057,
+        "anonMax": 58605568,
+        "fileMax": 228319232,
+        "dirtyMax": 14245888,
+        "writebackMax": 16777216,
+        "sockMax": 8204288,
+        "oomKillMax": 0
+      }
+    },
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 8,
+        "startedAt": 1792953361845,
+        "endedAt": 1792953422480,
+        "durationMs": 60635,
+        "batches": 22,
+        "requests": 176,
+        "statuses": {
+          "200": 88,
+          "429": 88
+        },
+        "byTenant": {
+          "a": {
+            "200": 44,
+            "429": 44
+          },
+          "b": {
+            "200": 44,
+            "429": 44
+          }
+        },
+        "latencyMs": {
+          "p50": 1478,
+          "p95": 2860,
+          "p99": 3022,
+          "max": 3023
+        },
+        "health": {
+          "requests": 22,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 43
+        },
+        "sessionRotations": 0,
+        "intentionalCancellations": 5,
+        "oversizedRejected": 3,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 2,
+        "startedAt": 1792953300639,
+        "endedAt": 1792953361845,
+        "durationMs": 61207,
+        "batches": 46,
+        "requests": 92,
+        "statuses": {
+          "200": 92
+        },
+        "byTenant": {
+          "a": {
+            "200": 47
+          },
+          "b": {
+            "200": 45
+          }
+        },
+        "latencyMs": {
+          "p50": 1305,
+          "p95": 1424,
+          "p99": 1484,
+          "max": 1484
+        },
+        "health": {
+          "requests": 46,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 7
+        },
+        "sessionRotations": 0,
+        "intentionalCancellations": 10,
+        "oversizedRejected": 5,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Soak phase",
+      "data": {
+        "concurrency": 1,
+        "startedAt": 1792953239648,
+        "endedAt": 1792953300638,
+        "durationMs": 60991,
+        "batches": 61,
+        "requests": 61,
+        "statuses": {
+          "200": 61
+        },
+        "byTenant": {
+          "a": {
+            "200": 31
+          },
+          "b": {
+            "200": 30
+          }
+        },
+        "latencyMs": {
+          "p50": 712,
+          "p95": 787,
+          "p99": 851,
+          "max": 851
+        },
+        "health": {
+          "requests": 61,
+          "statuses": [
+            200
+          ],
+          "p95Ms": 4
+        },
+        "sessionRotations": 0,
+        "intentionalCancellations": 13,
+        "oversizedRejected": 7,
+        "unexpectedFailures": 0
+      }
+    },
+    {
+      "title": "Soak summary",
+      "data": {
+        "success": true,
+        "profile": {
+          "samples": 176,
+          "durationMs": 182674,
+          "peakCgroupBytes": 271101952,
+          "maxSampledRssBytes": 124678144,
+          "maxSampledAnonBytes": 58605568,
+          "startRssBytes": 85528576,
+          "endRssBytes": 113725440,
+          "swapMaxBytes": 0,
+          "cpuAveragePercent": 41.59799424110711,
+          "cpuP95Percent": 53.20490384615385,
+          "cpuMaxSampledPercent": 62.16803921568628
+        },
+        "interruption": {
+          "intentionalSigkill": true,
+          "partialObserved": true,
+          "oomKilled": false,
+          "oldValidFilePreserved": true,
+          "sha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "incompleteVideoStatus": 404,
+          "remainingPartials": 0,
+          "healthyAfterRestart": true
+        },
+        "image": {
+          "appId": "sha256:74765f916f60cf47dd6c76cb53ee56c26c87eb38172cdd7efbbb2ae69b6c341b",
+          "node22BaseDigest": "node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914"
+        }
+      }
+    }
+  ]
+}

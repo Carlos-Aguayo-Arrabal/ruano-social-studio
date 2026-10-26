@@ -1,0 +1,56 @@
+{
+  "run": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40222009598",
+  "binaryTransferRef": "72d4853d5e955fc9239bbdf5a75a6373c42de21e",
+  "annotations": [
+    {
+      "title": "Memory evidence",
+      "data": {
+        "samples": 168,
+        "durationMs": 182721,
+        "rssMax": 132001792,
+        "heapMax": 14847392,
+        "externalMax": 40395100,
+        "arrayBuffersMax": 36621747,
+        "anonMax": 65716224,
+        "fileMax": 225673216,
+        "dirtyMax": 179048448,
+        "writebackMax": 63737856,
+        "sockMax": 3084288,
+        "oomKillMax": 0
+      }
+    },
+    {
+      "title": "Soak summary",
+      "data": {
+        "success": true,
+        "profile": {
+          "samples": 168,
+          "durationMs": 182721,
+          "peakCgroupBytes": 270139392,
+          "maxSampledRssBytes": 132001792,
+          "maxSampledAnonBytes": 65716224,
+          "startRssBytes": 85573632,
+          "endRssBytes": 103792640,
+          "swapMaxBytes": 0,
+          "cpuAveragePercent": 45.37051515698798,
+          "cpuP95Percent": 99.96555118110236,
+          "cpuMaxSampledPercent": 107.87324777887463
+        },
+        "interruption": {
+          "intentionalSigkill": true,
+          "partialObserved": true,
+          "oomKilled": false,
+          "oldValidFilePreserved": true,
+          "sha256": "238a88eccac1cb7d878234e3c406deeadb38c3a2186b41e790c4a6adf87c9bf9",
+          "incompleteVideoStatus": 404,
+          "remainingPartials": 0,
+          "healthyAfterRestart": true
+        },
+        "image": {
+          "appId": "sha256:cce9f6b7cd47112e50344c3200181ac7ad87db956e13c435b10927fc6128bbcd",
+          "node22BaseDigest": "node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914"
+        }
+      }
+    }
+  ]
+}
