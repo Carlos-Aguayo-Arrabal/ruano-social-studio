@@ -17,5 +17,5 @@ try{
  Object.assign(report,result);await lab.inspect(app);const logs=await docker(['logs','--tail','30',app],'',15000,true);assert.match(logs,/ENOSPC/);report.enospcObserved=true;
  const check=JSON.parse(await lab.exec(app,`import {readdir,readFile} from 'node:fs/promises';const walk=async p=>{let n=0;for(const e of await readdir(p,{withFileTypes:true})){if(e.isDirectory())n+=await walk(p+'/'+e.name);else if(/^\\.upload-.*\\.tmp$/.test(e.name))n++;}return n;};console.log(JSON.stringify({temporaries:await walk('/app/data')}));`));assert.equal(check.temporaries,0);report.temporaries=0;report.oomKilled=(await lab.inspect(app)).oom;assert.equal(report.oomKilled,false);report.success=true;ok=true;
 }catch(e){report.success=false;report.failure=e.message;process.exitCode=1;}
-finally{try{await lab.stopAll();await lab.remove();}catch(e){report.cleanupError=e.message;process.exitCode=1;}await rm(tmp,{recursive:true,force:true});}
+finally{try{await lab.stopAll();await lab.remove();}catch(e){report.cleanupError=e.message;report.success=false;process.exitCode=1;}await rm(tmp,{recursive:true,force:true});}
 await mkdir('artifacts',{recursive:true});await writeFile('artifacts/supervisor-disk.json',JSON.stringify(report,null,2));console.log('::notice title=Supervisor real disk full::'+JSON.stringify(report));

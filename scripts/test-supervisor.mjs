@@ -30,7 +30,6 @@ for(const mode of ['duration','quota','health','oom']){
    try{const value=JSON.parse(await lab.exec(client,prelude+`const headers=await login('synthetic-${user}'),body=Buffer.alloc(65536,37);body[0]=255;body[1]=216;body[2]=255;const r=await req('/api/photos/101?brand=${user[0]}',{method:'POST',headers,body});assert.equal(r.status,201);const id=(await r.json()).id;const got=await req('/api/photos/101/'+id+'?brand=${user[0]}',{headers});assert.equal(got.status,200);const data=Buffer.from(await got.arrayBuffer());assert.equal(hash(data),hash(body));console.log(JSON.stringify({id,bytes:data.length,sha256:hash(data)}));`));await book.complete(token,value.bytes);return value;}catch(e){await book.fail(token);throw e;}
   };
   report.stage='initial-reservations';const valid=await send('a1');await send('b1');report.reservationsBeforeStop=JSON.parse(await readFile(book.path,'utf8')).committed.length;
-  if(mode==='quota')await assert.rejects(send('a1'),e=>e.reason==='quota');
   artifactDir=join('artifacts','supervisor-'+mode);await mkdir(artifactDir,{recursive:true});journal=await Journal.create(join(artifactDir,'metrics.ndjson'),1024*1024);
   let prior,triggered=false;const atStart=Date.now(),selfStart=process.cpuUsage();
   const sample=async()=>{
@@ -44,18 +43,18 @@ for(const mode of ['duration','quota','health','oom']){
    if(!triggered){triggered=true;
     if(mode==='health')await lab.exec(app,"import {writeFile} from 'node:fs/promises';await writeFile('/tmp/health-fault','synthetic');");
     if(mode==='oom')void lab.exec(app,"const chunks=[];setInterval(()=>{for(let i=0;i<16;i++)chunks.push(Buffer.alloc(1048576,37));},10);",8000).catch(()=>{});
-   }
+   }else if(mode==='quota'){await send('a1');throw Error('quota-admission-was-not-blocked');}
    return value;
   };
   report.stage='supervision';const result=await supervise({sample,signal:cancellation.signal,stop:async()=>{admitting=false;await lab.stopAll();},journal,policy:{durationMs:mode==='oom'?20000:5000},intervalMs:500,probeTimeoutMs:8000});
-  report.stop=result.reason;report.last=result.last;assert.equal(result.reason,mode==='oom'?'oom':mode==='health'?'health':'duration');assert.equal(admitting,false);assert.equal((await lab.inspect(app)).running,false);report.stoppedOwnedApplication=true;
+  report.stop=result.reason;report.last=result.last;assert.equal(result.reason,mode==='oom'?'oom':mode==='health'?'health':mode==='quota'?'quota':'duration');assert.equal(admitting,false);assert.equal((await lab.inspect(app)).running,false);report.stoppedOwnedApplication=true;
   report.stage='recovery';// Explicit recovery subtest after stop; never resumes the load loop.
   for(const id of [app,helper,client])await lab.action(id,'start');await ready();
   const verified=await lab.exec(client,prelude+`const headers=await login('synthetic-a1');const r=await req('/api/photos/101/${valid.id}?brand=a',{headers});assert.equal(r.status,200);assert.equal(hash(Buffer.from(await r.arrayBuffer())),'${valid.sha256}');const other=await login('synthetic-b1');assert.equal((await req('/api/photos/101/${valid.id}?brand=a',{headers:other})).status,403);assert.equal((await req('/logout',{headers})).status,303);assert.equal((await req('/api/me',{headers})).status,401);console.log('verified');`);assert.equal(verified,'verified');assert.equal((await disk()).temporaries,0);
   report.recovery={validHash:true,crossTenant403:true,revoked401:true,temporaries:0};report.stage='verified';report.success=true;ok=true;
  }catch(e){report.failure=e.message;process.exitCode=1;}
  finally{
-  try{await lab.stopAll();await lab.remove({volumes:ok});}catch(e){report.cleanupError=e.message;process.exitCode=1;}
+  try{await lab.stopAll();await lab.remove({volumes:ok});}catch(e){report.cleanupError=e.message;report.success=false;process.exitCode=1;}
   if(journal)await journal.close();if(book&&artifactDir)await writeFile(join(artifactDir,'reservations.json'),await readFile(book.path),{mode:0o600});if(ok)await rm(tmp,{recursive:true,force:true});else{report.privateBundlePreserved=tmp;report.preservedVolumes=lab.volumes;}
  }
  console.log('::notice title=Supervisor short case::'+JSON.stringify(report));

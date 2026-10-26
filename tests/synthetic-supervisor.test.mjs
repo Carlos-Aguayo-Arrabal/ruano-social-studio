@@ -46,6 +46,7 @@ test('bounded private journal refuses overflow and supervisor stops on hung samp
   const j=await Journal.create(join(dir,'metrics'),2200);await j.append({metric:1});await assert.rejects(j.append({value:'x'.repeat(200)}),e=>e.reason==='log-budget');await j.close();assert.ok((await stat(join(dir,'metrics'))).size<=2200);
   const parallel=await Journal.create(join(dir,'parallel'),2300),writes=await Promise.allSettled([parallel.append({v:'x'.repeat(150)}),parallel.append({v:'x'.repeat(150)})]);assert.equal(writes.filter(x=>x.status==='fulfilled').length,1);await parallel.close();assert.ok((await stat(join(dir,'parallel'))).size<=252);
   let calls=0;const r=await supervise({sample:()=>new Promise(()=>{}),stop:async reason=>{calls++;assert.equal(reason,'observation-timeout');},journal:{append:async()=>{}},probeTimeoutMs:10});assert.equal(r.reason,'observation-timeout');assert.equal(calls,1);
+  let closed=false;const quota=await supervise({sample:async()=>{throw new Stop('quota');},stop:async reason=>{assert.equal(reason,'quota');closed=true;},journal:{append:async()=>{assert.fail('must not log a missing sample');}}});assert.equal(quota.reason,'quota');assert.equal(closed,true);
   const c=new AbortController();c.abort();assert.equal((await supervise({sample:async()=>sample(),stop:async()=>{},journal:{append:async()=>{}},signal:c.signal})).reason,'cancelled');
  }finally{await rm(dir,{recursive:true,force:true});}
 });
