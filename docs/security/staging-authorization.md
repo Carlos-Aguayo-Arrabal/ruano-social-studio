@@ -70,6 +70,8 @@ node scripts/probe-fdatasync.mjs /SCRATCH_SINTETICO_AUTORIZADO workers=2 mib=120
 node scripts/probe-fdatasync.mjs /SCRATCH_SINTETICO_AUTORIZADO workers=4 mib=120 rounds=10
 ```
 
+La imagen de aplicación no incluye esta sonda. Para la futura ejecución, usar un helper Node con el mismo digest de base probado, UID/GID 1000, raíz readonly, sin red, 256 MiB/swap0/1 CPU/PIDs128, montando **solo** este script revisado readonly y un scratch sintético nuevo del volumen candidato en modo escritura. No montar el socket Docker ni el DATA_DIR activo. Registrar SHA-256 del script montado; no asumir que el comando está disponible dentro de la imagen de aplicación. La creación de ese helper también requiere la autorización futura.
+
 No ejecutar sobre DATA_DIR, producción ni filesystem que no sea el persistente candidato. Ejecutar secuencialmente y repetir tres veces cada nivel, registrando identidad del volumen/driver, kernel, imagen, límites, espacio libre, UTC y métricas numéricas sin env. Cada nivel escribe hasta 1,2/2,4/4,8 GiB acumulados pero borra cada archivo terminado; pico máximo ~480 MiB. La prueba no mide pérdida eléctrica ni confirma que el soporte remoto cumpla flush.
 
 Criterios propuestos, previos a medir: sync p95 ≤100 ms, p99 ≤500 ms, máximo ≤2 s; archivo completo ≤60 s a cada concurrencia; cero EIO/ENOSPC/EDQUOT, hashes funcionales correctos en prueba HTTP posterior. Código 0 cumple latencias; 2 incumple; cualquier error de I/O/interrupción falla. Medir además proxy a 120 MiB: p95 ≤60 s, ninguno >120 s, health p95 ≤500 ms y todos 200. No cambiar umbrales a posteriori sin justificar/revisar.
