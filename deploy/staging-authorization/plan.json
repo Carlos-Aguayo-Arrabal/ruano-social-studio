@@ -1,0 +1,84 @@
+{
+  "schema": "review-only-not-provider-api-v1",
+  "infrastructureAuthorized": false,
+  "referenceCommit": "6277f7baee4202d655aaf015b3adde6663c98e0b",
+  "referencePR": 5,
+  "project": "NEW-UUID-REQUIRED",
+  "domain": "review.example.invalid",
+  "source": {
+    "autoDeploy": false,
+    "commitOnly": true
+  },
+  "runtime": {
+    "nodeMajor": 22,
+    "replicas": 1,
+    "processes": 1,
+    "cpuQuota": 1,
+    "memoryMaxBytes": 268435456,
+    "swapMaxBytes": 0,
+    "pidsMax": 128,
+    "uid": 1000,
+    "gid": 1000,
+    "readOnlyRoot": true,
+    "tmpfsBytes": 33554432,
+    "hostPorts": [],
+    "dockerSocket": false,
+    "updateOrder": "stop-first"
+  },
+  "network": {
+    "offlineRehearsal": "none",
+    "provider": "new-exclusive-staging-network-pending",
+    "defaultDenyEgress": true,
+    "productionNetworks": false,
+    "perimeterAllRoutes": true
+  },
+  "volume": {
+    "mount": "/app/data",
+    "newEmptyExclusive": true,
+    "persistent": true,
+    "productionSnapshots": false
+  },
+  "storage": {
+    "datasetBudgetBytes": 1073741824,
+    "tenantBudgetBytes": 536870912,
+    "userBudgetBytes": 268435456,
+    "alertPercent": 70,
+    "stopPercent": 80,
+    "minimumFreeBytes": 12884901888,
+    "applicationAccumulatedQuotasImplemented": false,
+    "loadStopFreeBytes": 6442450944
+  },
+  "soak": {
+    "activeSeconds": 21600,
+    "idleSeconds": 1800,
+    "concurrencyPhases": [
+      1,
+      2,
+      8
+    ],
+    "appMemoryBytes": 268435456,
+    "clientMemoryBytes": 536870912,
+    "observerMemoryBytes": 67108864,
+    "hardWallSeconds": 27000,
+    "authorizedToRun": false
+  },
+  "backup": {
+    "offline": true,
+    "externalProviderConfigured": false,
+    "encrypted": true,
+    "independentRestoreRequired": true,
+    "rpoHours": 24,
+    "provisionalRtoMinutes": 30,
+    "automaticDeletion": false
+  },
+  "gates": {
+    "providerIsolation": "pending",
+    "effectiveSwapZero": "pending",
+    "persistentDiskProbe": "pending",
+    "diskGuard": "pending",
+    "externalRestore": "pending",
+    "tls": "pending",
+    "sixHourSoak": "pending",
+    "creationApproval": "pending"
+  }
+}
