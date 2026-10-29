@@ -1,0 +1,365 @@
+{
+  "sha": "80cfcb3e5bed4d1fb0aaaf0a10cd3878f034bcc3",
+  "run": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40182903549",
+  "summary": {
+    "success": true,
+    "memoryLimitBytes": 268435456,
+    "caseCount": 15,
+    "disk": {
+      "files": 10,
+      "bytes": 390860630,
+      "partials": 0
+    },
+    "restart": {
+      "healthy": true,
+      "status": 200,
+      "bytes": 125829120,
+      "header": "ftyp",
+      "sha256": "e849b6d21d8787dc2b6b73b6ef517f4a507c41fd6ae488f56bea93b61e8f4d4c",
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0
+    }
+  },
+  "cases": [
+    {
+      "name": "photo-exact-4MiB",
+      "bytes": 4194304,
+      "expected": 200,
+      "status": 200,
+      "ms": 29,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "memory": {
+        "currentBytes": 37470208,
+        "peakBytes": 44163072,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 29945856,
+        "rssBytes": 90001408,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "photo-over-4MiB",
+      "bytes": 4194305,
+      "expected": "reject",
+      "status": 413,
+      "ms": 28,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "memory": {
+        "currentBytes": 38240256,
+        "peakBytes": 44892160,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 30736384,
+        "rssBytes": 91062272,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "image-exact-8MiB",
+      "bytes": 8388608,
+      "expected": 200,
+      "status": 200,
+      "ms": 43,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "memory": {
+        "currentBytes": 46600192,
+        "peakBytes": 53338112,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 29929472,
+        "rssBytes": 90255360,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "image-over-8MiB",
+      "bytes": 8388609,
+      "expected": "reject",
+      "status": 413,
+      "ms": 61,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "memory": {
+        "currentBytes": 47181824,
+        "peakBytes": 56594432,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 30740480,
+        "rssBytes": 91131904,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "video-exact-120MiB",
+      "bytes": 125829120,
+      "expected": 200,
+      "status": 200,
+      "ms": 742,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "memory": {
+        "currentBytes": 177737728,
+        "peakBytes": 184750080,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 31690752,
+        "rssBytes": 92213248,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "video-over-120MiB",
+      "bytes": 125829121,
+      "expected": "reject",
+      "status": 413,
+      "ms": 610,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "memory": {
+        "currentBytes": 135213056,
+        "peakBytes": 268447744,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 32452608,
+        "rssBytes": 93036544,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-256KiB-images",
+      "concurrency": 4,
+      "totalMs": 25,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 2,
+        "429": 2
+      },
+      "maxRequestMs": 24,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 136826880,
+        "peakBytes": 268447744,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 33554432,
+        "rssBytes": 94142464,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-256KiB-images",
+      "concurrency": 8,
+      "totalMs": 22,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 3,
+        "429": 5
+      },
+      "maxRequestMs": 18,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 136753152,
+        "peakBytes": 268447744,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 33230848,
+        "rssBytes": 93822976,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-120MiB-videos",
+      "concurrency": 1,
+      "healthStatus": 200,
+      "totalMs": 647,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 1
+      },
+      "maxRequestMs": 646,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 265334784,
+        "peakBytes": 268447744,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 33980416,
+        "rssBytes": 94568448,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-120MiB-videos",
+      "concurrency": 2,
+      "healthStatus": 200,
+      "totalMs": 3280,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 2
+      },
+      "maxRequestMs": 3280,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 260456448,
+        "peakBytes": 268632064,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 32415744,
+        "rssBytes": 92999680,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-120MiB-videos",
+      "concurrency": 4,
+      "healthStatus": 200,
+      "totalMs": 2268,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 2,
+        "429": 2
+      },
+      "maxRequestMs": 2264,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 255332352,
+        "peakBytes": 269139968,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 31920128,
+        "rssBytes": 92504064,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-120MiB-videos",
+      "concurrency": 8,
+      "healthStatus": 200,
+      "totalMs": 3248,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 2,
+        "429": 6
+      },
+      "maxRequestMs": 3247,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 264495104,
+        "peakBytes": 269139968,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 34422784,
+        "rssBytes": 95006720,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-120MiB-videos",
+      "concurrency": 16,
+      "healthStatus": 200,
+      "totalMs": 2257,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 2,
+        "429": 14
+      },
+      "maxRequestMs": 2257,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 261480448,
+        "peakBytes": 271167488,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 33927168,
+        "rssBytes": 94515200,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-120MiB-videos",
+      "concurrency": 32,
+      "healthStatus": 200,
+      "totalMs": 3516,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 2,
+        "429": 30
+      },
+      "maxRequestMs": 3515,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 263262208,
+        "peakBytes": 271167488,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 36085760,
+        "rssBytes": 96665600,
+        "includesFileCache": true
+      }
+    },
+    {
+      "name": "concurrent-120MiB-downloads",
+      "concurrency": 4,
+      "totalMs": 1678,
+      "running": true,
+      "oomKilled": false,
+      "exitCode": 0,
+      "statuses": {
+        "200": 4
+      },
+      "maxRequestMs": 0,
+      "networkErrors": [],
+      "memory": {
+        "currentBytes": 242515968,
+        "peakBytes": 271167488,
+        "swapCurrentBytes": 0,
+        "swapMaxBytes": 0,
+        "configuredLimitBytes": 268435456,
+        "anonBytes": 32043008,
+        "rssBytes": 92762112,
+        "includesFileCache": true
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
-FROM node:22-alpine
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE}
 
 WORKDIR /app
 
@@ -11,6 +12,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY server.mjs index.html ./
+COPY lib ./lib
+COPY scripts/photo-storage.mjs ./scripts/photo-storage.mjs
 
 # Carpeta de datos (inmuebles, contenidos y fotos). En Easypanel se monta un
 # volumen en /app/data para que no se pierda en cada despliegue.

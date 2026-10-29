@@ -1,0 +1,95 @@
+{
+  "plannedOnly": true,
+  "infrastructureCreated": false,
+  "plan": {
+    "schema": "manual-reference-not-easypanel-api",
+    "project": "ruano-stage-756ce1a5-42f",
+    "volume": {
+      "name": "ruano-stage-756ce1a5-42f-data",
+      "mount": "/app/data",
+      "external": false,
+      "uid": 1000,
+      "gid": 1000
+    },
+    "replicas": 1,
+    "updates": {
+      "automatic": false,
+      "order": "stop-first",
+      "parallelism": 1
+    },
+    "resources": {
+      "cpus": 1,
+      "memoryBytes": 268435456,
+      "swap": false,
+      "pids": 128,
+      "uploadConcurrency": {
+        "global": 4,
+        "perUser": 2,
+        "perTenant": 3
+      }
+    },
+    "recovery": {
+      "offline": true,
+      "newBackupAndRestoreTargets": true,
+      "externalRestoreVerified": false,
+      "newSessionsAfterRestore": true
+    },
+    "image": "ruano-staging:d64e947be438",
+    "source": {
+      "repository": "Carlos-Aguayo-Arrabal/ruano-social-studio",
+      "commit": "d64e947be43846fd15bb32fe439e4491b46694e7",
+      "branch": "security/phase-0-2026-10-24"
+    },
+    "build": {
+      "dockerfile": "Dockerfile",
+      "nodeImage": "node@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914",
+      "basePinned": true,
+      "requiresPinnedBase": false
+    },
+    "storage": {
+      "syntheticDatasetBudgetBytes": 1073741824,
+      "applicationDiskQuotaEnforced": false,
+      "minFreeBytesBeforeRehearsal": 8589934592,
+      "alertAtBudgetPercent": 70,
+      "stopAtBudgetPercent": 80
+    },
+    "stagingEdgeNetwork": {
+      "name": "ruano-stage-756ce1a5-42f-edge",
+      "create": false,
+      "productionNetworksAllowed": false,
+      "defaultDenyEgressRequired": true
+    },
+    "perimeter": {
+      "credentials": "perimeter.env (private; never commit or print)",
+      "mode": "closed before app routing",
+      "coversAllPaths": true,
+      "bcryptHashInPanelRequired": true
+    },
+    "internalPort": 3000,
+    "publishedHostPorts": [],
+    "domain": {
+      "hostname": "ruano-stage-756ce1a5-42f.example.invalid",
+      "dnsConfigured": false,
+      "tls": "pending-real-staging-validation"
+    },
+    "credentials": "synthetic.env (private; do not commit or print)",
+    "autoDeploy": false,
+    "networks": {
+      "isolatedRehearsal": "none",
+      "futureProxy": "new staging-only network after authorization; never production networks"
+    },
+    "perimeterPaths": [
+      "/",
+      "/login",
+      "/api/*",
+      "/w/*",
+      "/r/*",
+      "/m/*",
+      "/health",
+      "/vendor/*"
+    ]
+  },
+  "candidateApproved": false,
+  "readiness": "Blocked by reproduced OOM and unverified EasyPanel isolation/resource requirements",
+  "baseDigestEvidenceRun": "40217442868 (successful short run)"
+}

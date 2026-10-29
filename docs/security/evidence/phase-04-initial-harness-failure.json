@@ -1,0 +1,11 @@
+{
+  "sha": "959400a6d43ef3c2510116102b1b87eb1f17afe2",
+  "run": "https://github.com/Carlos-Aguayo-Arrabal/ruano-social-studio/actions/runs/40182561395",
+  "classification": "generated load-client syntax error before sustained workload",
+  "annotations": [
+    {
+      "message": "{\"success\":false,\"failure\":\"docker run exit 1: file:///app/[eval1]:15\\n});}const r=await req('/api/sync',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({brands:{upsert:['a','b'].map(id=>({id,name:'Synthetic '+id}))},data:{a:{properties:{upsert:[{id:101}]}},b:{properties:{upsert:[{id:101}]}}})});assert.equal(r.status,200);\\n                                                                                                                                                                                     \",\"finalState\":{\"running\":true,\"oomKilled\":false,\"exitCode\":0}}",
+      "title": "Soak summary"
+    }
+  ]
+}
