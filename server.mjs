@@ -193,6 +193,16 @@ FORMATOS:
 - carrusel: un párrafo de 250-450 caracteres y después "Diapositivas:" con 5 a 7 líneas numeradas, una por foto.
 - historias: de 3 a 5 líneas numeradas ("1. ...", "2. ..."), cada una en su propia línea, de menos de 70 caracteres.
 - reel: líneas "Gancho:", "Escenas:" (varias líneas cortas), "Cierre:" y "Texto:" con un pie de 150-300 caracteres.`;
+const CATALOG_SYSTEM = `Eres el ayudante de catálogo de {TIENDA}, una tienda de ropa. Miras la foto de una prenda o artículo y propones su ficha en español de España.
+
+Reglas:
+- Describe solo lo que se ve en la foto. No inventes tejido, marca, talla, precio ni composición. Si dudas de algo, déjalo vacío.
+- es_producto: false si la foto no muestra un producto que se pueda vender (por ejemplo, el local, una persona sin prenda clara o un paisaje).
+- nombre: corto, de 2 a 6 palabras, como en la etiqueta de una tienda: tipo de prenda + rasgo + color si es uno (por ejemplo «Vestido midi de flores», «Blusa blanca de lino»). Sin marcas.
+- categoria: una sola palabra o dos en plural (Vestidos, Blusas, Camisetas, Pantalones, Faldas, Chaquetas, Jerséis, Bolsos, Calzado, Complementos…).
+- colores: los colores visibles, separados por comas, con mayúscula inicial.
+- detalles: hasta 4 rasgos visibles separados por comas (escote, manga, estampado, botones, cinturón, largo…).
+- descripcion: 1 o 2 frases naturales (120 a 250 caracteres) sobre cómo es y para qué ocasiones encaja. Sin hablar del cuerpo ni decir que adelgaza o estiliza.`;
 const CAMPAIGN_BRIEF_SHOP = {
   nuevo: 'Novedad recién llegada a la tienda: preséntala con ganas y cuenta lo mejor que tiene.',
   precio: 'Rebaja: destaca el precio anterior, el nuevo y el ahorro, sin presionar.',
@@ -251,7 +261,7 @@ function systemFor(base, brand) {
     .replace('Ruano Inmobiliaria (Almería)', zone ? `${name} (${zone})` : name);
 }
 
-async function askClaude(userText, schema, brand) {
+async function askClaude(userText, schema, brand, system) {
   const response = await anthropic.beta.messages.create({
     model: AI_MODEL,
     max_tokens: 16000,
@@ -259,7 +269,7 @@ async function askClaude(userText, schema, brand) {
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
     output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
-    system: systemFor(AI_SYSTEM, brand),
+    system: system || systemFor(AI_SYSTEM, brand),
     messages: [{ role: 'user', content: userText }],
   });
   if (response.stop_reason === 'refusal') throw Object.assign(new Error('Claude no ha podido redactar este texto. Revisa la ficha e inténtalo de nuevo.'), { status: 422 });
@@ -403,7 +413,7 @@ async function askOllamaOne(userText, schema, brand) {
 
 const aiProvider = () => (anthropic ? 'claude' : ollama.reachable && ollama.hasModel ? 'ollama' : null);
 
-async function generateAi(userText, schema, brand) {
+async function generateAi(userText, schema, brand, system) {
   const provider = aiProvider();
   if (provider === 'ollama') {
     try { return await askOllama(userText, schema, brand); }
@@ -415,7 +425,7 @@ async function generateAi(userText, schema, brand) {
     }
   }
   if (provider === 'claude') {
-    try { return await askClaude(userText, schema, brand); }
+    try { return await askClaude(userText, schema, brand, system); }
     catch (err) {
       if (err instanceof Anthropic.AuthenticationError) throw Object.assign(new Error('La clave de Claude no es válida. Revísala en Easypanel.'), { status: 503 });
       if (err instanceof Anthropic.RateLimitError) throw Object.assign(new Error('Claude está saturado ahora mismo. Inténtalo en un minuto.'), { status: 429 });
@@ -448,7 +458,7 @@ async function handleAi(req, res, url) {
     const provider = aiProvider();
     return sendJson(res, 200, {
       enabled: Boolean(provider), provider, model: provider === 'claude' ? AI_MODEL : provider === 'ollama' ? OLLAMA_MODEL : null,
-      preparing: !anthropic && ollama.pulling, reachable: anthropic ? true : ollama.reachable,
+      preparing: !anthropic && ollama.pulling, reachable: anthropic ? true : ollama.reachable, vision: Boolean(anthropic),
     });
   }
   const jm = url.pathname.match(/^\/api\/ai\/jobs\/([a-f0-9]{18})$/);
@@ -461,6 +471,23 @@ async function handleAi(req, res, url) {
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Método no permitido' });
   if (!aiProvider()) return sendJson(res, 503, { error: !anthropic && ollama.pulling ? 'La IA se está preparando (descargando el modelo). Inténtalo en unos minutos.' : 'La IA no está disponible ahora mismo.' });
   if (!aiAllowed()) return sendJson(res, 429, { error: 'Has llegado al límite de textos con IA de esta hora. Inténtalo más tarde.' });
+  // Alta rápida de productos: Claude mira la foto y propone la ficha (la IA gratuita del servidor no ve imágenes)
+  if (url.pathname === '/api/ai/product') {
+    if (!anthropic) return sendJson(res, 503, { error: 'Reconocer productos en fotos necesita Claude (ANTHROPIC_API_KEY en Easypanel). La IA gratuita del servidor no ve imágenes.' });
+    const pb = JSON.parse((await readRaw(req, 3 * 1024 * 1024)).toString('utf8') || '{}');
+    const im = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(pb.image || ''));
+    if (!im) return sendJson(res, 400, { error: 'Foto no válida' });
+    const cats = (Array.isArray(pb.categories) ? pb.categories : []).map(c => clip(c, 40)).filter(Boolean).slice(0, 30);
+    const shopName = clip(pb.brand?.name, 80) || 'la tienda';
+    const system = CATALOG_SYSTEM.replace('{TIENDA}', shopName);
+    const schema = { type: 'object', properties: { es_producto: { type: 'boolean' }, nombre: { type: 'string' }, categoria: { type: 'string' }, colores: { type: 'string' }, detalles: { type: 'string' }, descripcion: { type: 'string' } }, required: ['es_producto', 'nombre', 'categoria', 'colores', 'detalles', 'descripcion'], additionalProperties: false };
+    const content = [{ type: 'image', source: { type: 'base64', media_type: `image/${im[1]}`, data: im[2] } },
+      { type: 'text', text: `Propón la ficha del producto de esta foto.${cats.length ? `\nCategorías que ya usa la tienda (usa una de ellas si encaja): ${cats.join(', ')}` : ''}` }];
+    return sendJson(res, 202, { job: startAiJob(async () => {
+      const d = await generateAi(content, schema, pb.brand, system);
+      return { isProduct: d.es_producto !== false, name: clip(d.nombre, 80), category: clip(d.categoria, 40), colors: clip(d.colores, 80), details: clip(d.detalles, 200), description: clip(d.descripcion, 600) };
+    }) });
+  }
   const body = JSON.parse((await readRaw(req, 64 * 1024)).toString('utf8'));
   const shop = body.brand?.kind === 'tienda', tone = (shop ? TONES_SHOP : TONES)[body.tone] || TONES.cercano, sheet = shop ? productSheet(body.property) : propertySheet(body.property), sheetTitle = shop ? 'Ficha del producto' : 'Ficha del inmueble';
   const contact = clip(body.contact, 120) || 'pisosenalmeria.es';
