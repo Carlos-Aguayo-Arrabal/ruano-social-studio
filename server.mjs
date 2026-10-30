@@ -971,15 +971,16 @@ function niceTitleSrv(t, p) {
   }
   return t;
 }
-const WEB_STAMPS = { nuevo: 'Nuevo', precio: 'Nuevo precio', puertas: 'Puertas abiertas', reservado: 'Reservado', vendido: 'Vendido' };
-function publicProp(p) {
+const WEB_STAMPS = { nuevo: 'Nuevo', precio: 'Nuevo precio', puertas: 'Puertas abiertas', reservado: 'Reservado', vendido: 'Vendido', ultimas: 'Últimas unidades' };
+const SHOP_STAMPS = { nuevo: 'Novedad', precio: 'Rebaja', ultimas: 'Últimas unidades', vendido: 'Agotado' };
+function publicProp(p, shop = false) {
   const stamp = WEB_STAMPS[p.stamp] ? p.stamp : '';
   return {
     id: String(p.id), ref: clip(p.reference, 20), title: niceTitleSrv(clip(p.title, 160), p), operation: clip(p.operation, 20) || 'Venta',
     location: clip(p.location, 80), price: clip(p.price, 30), oldPrice: stamp === 'precio' ? clip(p.oldPrice, 30) : '',
-    facts: [p.built, p.useful, p.beds, p.baths, p.floor].map(x => clip(x, 40)).filter(Boolean),
+    facts: (shop ? [p.sizes && `Tallas: ${p.sizes}`, p.colors && `Colores: ${p.colors}`, p.material] : [p.built, p.useful, p.beds, p.baths, p.floor]).map(x => clip(x, 60)).filter(Boolean),
     extras: clip(p.extras, 300), description: clip(p.description, 4000),
-    stamp, stampLabel: stamp === 'vendido' && p.operation === 'Alquiler' ? 'Alquilado' : WEB_STAMPS[stamp] || '',
+    stamp, stampLabel: shop ? SHOP_STAMPS[stamp] || '' : stamp === 'vendido' && p.operation === 'Alquiler' ? 'Alquilado' : WEB_STAMPS[stamp] || '',
   };
 }
 const originOf = req => `${String(req.headers['x-forwarded-proto'] || (isProduction ? 'https' : 'http')).split(',')[0]}://${req.headers['x-forwarded-host'] || req.headers.host}`;
@@ -1023,41 +1024,41 @@ function contactButtons(c, text) {
     c.phone && `<a class="btn light" data-hit="tel" href="tel:${escHtml(c.phone)}">Llamar</a>`].filter(Boolean).join('');
 }
 async function propertyPage(req, data, webId, p) {
-  const b = data.brand, c = contactOf(b), x = publicProp(p), origin = originOf(req), url = `${origin}/w/${webId}/${x.id}`;
+  const b = data.brand, shop = b.kind === 'tienda', c = contactOf(b), x = publicProp(p, shop), origin = originOf(req), url = `${origin}/w/${webId}/${x.id}`;
   const n = (await readManifest(x.id)).photos?.length || 0;
   const gallery = n ? `<div class="gal">${Array.from({ length: Math.min(n, 40) }, (_, i) => `<img src="/w/${webId}/${x.id}/foto/${i}" alt="Foto ${i + 1} de ${escHtml(x.title)}"${i ? ' loading="lazy"' : ''}>`).join('')}</div><p class="galnote">${n} fotos · desliza para verlas</p>` : '';
-  const kicker = [x.operation === 'Alquiler' ? 'En alquiler' : 'En venta', x.location].filter(Boolean).join(' · ');
-  const askText = `Hola, me interesa la REF. ${x.ref} (${x.title}). ¿Podemos concertar una visita?`;
-  const body = `<a class="top" href="/w/${webId}"><div class="in">${logoHtml(b)}<div><b>${escHtml(b.name)}</b><small>${escHtml(b.slogan || b.subline || 'Ver todos los inmuebles')}</small></div></div></a>
+  const kicker = shop ? x.location : [x.operation === 'Alquiler' ? 'En alquiler' : 'En venta', x.location].filter(Boolean).join(' · ');
+  const askText = shop ? `Hola, me interesa la REF. ${x.ref} (${x.title}). ¿Está disponible en mi talla?` : `Hola, me interesa la REF. ${x.ref} (${x.title}). ¿Podemos concertar una visita?`;
+  const body = `<a class="top" href="/w/${webId}"><div class="in">${logoHtml(b)}<div><b>${escHtml(b.name)}</b><small>${escHtml(b.slogan || b.subline || (shop ? 'Ver todos los productos' : 'Ver todos los inmuebles'))}</small></div></div></a>
 <main>${gallery}<section class="card">${x.stampLabel ? `<span class="stamp ${x.stamp}">${escHtml(x.stampLabel)}</span><br>` : ''}<span class="kick">${escHtml(kicker)}</span><h1>${escHtml(x.title)}</h1>
 ${x.price ? `<span class="price">${escHtml(x.price)}</span>${x.oldPrice ? `<span class="old">${escHtml(x.oldPrice)}</span>` : ''}` : ''}
 ${x.facts.length ? `<ul class="facts">${x.facts.map(f => `<li>${escHtml(f)}</li>`).join('')}</ul>` : ''}${x.extras ? `<p class="extras">${escHtml(x.extras)}</p>` : ''}
 ${x.description ? `<p class="desc">${escHtml(x.description)}</p>` : ''}<p class="ref">Referencia ${escHtml(x.ref)}</p></section>
-<section class="card" id="visita"><h2>¿Te interesa? Pide información o una visita</h2>${leadForm(webId, x.id, `Me interesa la REF. ${x.ref}. ¿Cuándo podría visitarla?`, b)}</section>
-<footer>${escHtml(b.name)}${b.footer ? ` · ${escHtml(b.footer)}` : ''}<br><a href="/w/${webId}">Ver más inmuebles</a></footer></main>
-<div class="bar">${contactButtons(c, askText)}<a class="btn" href="#visita">Pedir visita</a></div>`;
+<section class="card" id="visita"><h2>${shop ? '¿Te interesa? Pregúntanos por tu talla' : '¿Te interesa? Pide información o una visita'}</h2>${leadForm(webId, x.id, shop ? `Me interesa la REF. ${x.ref}. ¿Está disponible en la talla…?` : `Me interesa la REF. ${x.ref}. ¿Cuándo podría visitarla?`, b)}</section>
+<footer>${escHtml(b.name)}${b.footer ? ` · ${escHtml(b.footer)}` : ''}<br><a href="/w/${webId}">${shop ? 'Ver más productos' : 'Ver más inmuebles'}</a></footer></main>
+<div class="bar">${contactButtons(c, askText)}<a class="btn" href="#visita">${shop ? 'Preguntar' : 'Pedir visita'}</a></div>`;
   const desc = [x.price, x.facts.slice(0, 3).join(' · '), x.location].filter(Boolean).join(' · ');
   const priceNum = Number(String(x.price).replace(/[^\d]/g, '')) || undefined;
-  const ld = { '@context': 'https://schema.org', '@type': 'RealEstateListing', name: x.title, description: (x.description || desc).slice(0, 500), url, image: n ? [`${origin}/w/${webId}/${x.id}/portada.jpg`] : undefined,
-    offers: priceNum ? { '@type': 'Offer', price: priceNum, priceCurrency: 'EUR', availability: x.stamp === 'vendido' || x.stamp === 'reservado' ? 'https://schema.org/SoldOut' : 'https://schema.org/InStock', seller: { '@type': 'RealEstateAgent', name: b.name } } : undefined,
-    address: x.location ? { '@type': 'PostalAddress', addressLocality: x.location, addressCountry: 'ES' } : undefined };
+  const ld = { '@context': 'https://schema.org', '@type': shop ? 'Product' : 'RealEstateListing', name: x.title, description: (x.description || desc).slice(0, 500), url, image: n ? [`${origin}/w/${webId}/${x.id}/portada.jpg`] : undefined,
+    offers: priceNum ? { '@type': 'Offer', price: priceNum, priceCurrency: 'EUR', availability: x.stamp === 'vendido' || x.stamp === 'reservado' ? 'https://schema.org/SoldOut' : 'https://schema.org/InStock', seller: { '@type': shop ? 'Store' : 'RealEstateAgent', name: b.name } } : undefined,
+    address: !shop && x.location ? { '@type': 'PostalAddress', addressLocality: x.location, addressCountry: 'ES' } : undefined };
   const head = `<script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\u003c')}</script>`;
   return webShell({ brand: b, title: `${x.title} · ${b.name}`, desc, image: n ? `${origin}/w/${webId}/${x.id}/portada.jpg` : '', url, body: `<div id="hitctx" data-w="${webId}" data-p="${x.id}" hidden></div>` + body, script: LEAD_SCRIPT, head });
 }
 async function bioPage(req, data, webId) {
-  const b = data.brand, c = contactOf(b), origin = originOf(req);
+  const b = data.brand, shop = b.kind === 'tienda', c = contactOf(b), origin = originOf(req);
   const items = [];
   for (const p of data.properties.slice(0, 60)) {
-    const x = publicProp(p), has = ((await readManifest(x.id)).photos?.length || 0) > 0;
+    const x = publicProp(p, shop), has = ((await readManifest(x.id)).photos?.length || 0) > 0;
     items.push(`<a class="item" href="/w/${webId}/${x.id}">${has ? `<img src="/w/${webId}/${x.id}/foto/0" alt="" loading="lazy">` : '<span class="ph"></span>'}<div>${x.stampLabel ? `<span class="stamp ${x.stamp}">${escHtml(x.stampLabel)}</span>` : ''}<b>${escHtml(x.title)}</b><small>${escHtml([x.location, `REF. ${x.ref}`].filter(Boolean).join(' · '))}</small>${x.price ? `<div class="p">${escHtml(x.price)}</div>` : ''}</div></a>`);
   }
   const links = [contactButtons(c, `Hola, os escribo desde Instagram.`), c.web && `<a class="btn light" data-hit="web" href="https://${escHtml(c.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">${escHtml(c.web)}</a>`].filter(Boolean).join('');
   const body = `<main><div class="hero">${logoHtml(b)}<h1>${escHtml(b.name)}</h1><p>${escHtml([b.slogan, b.subline].filter(Boolean).join(' · '))}</p></div>
-<div class="links">${links}<a class="btn" href="#vender">¿Quieres vender o alquilar tu vivienda?</a></div>
-<p class="sec">Inmuebles disponibles</p><div class="list">${items.join('') || '<p class="card">Pronto publicaremos nuevos inmuebles.</p>'}</div>
-<section class="card" id="vender"><h2>¿Vendes, alquilas o buscas vivienda?</h2>${leadForm(webId, 0, 'Hola, me gustaría que me contactarais para…', b)}</section>
+<div class="links">${links}<a class="btn" href="#vender">${shop ? '¿Buscas algo en concreto? Escríbenos' : '¿Quieres vender o alquilar tu vivienda?'}</a></div>
+<p class="sec">${shop ? 'Novedades' : 'Inmuebles disponibles'}</p><div class="list">${items.join('') || `<p class="card">${shop ? 'Pronto publicaremos novedades.' : 'Pronto publicaremos nuevos inmuebles.'}</p>`}</div>
+<section class="card" id="vender"><h2>${shop ? '¿Buscas una prenda o una talla?' : '¿Vendes, alquilas o buscas vivienda?'}</h2>${leadForm(webId, 0, 'Hola, me gustaría que me contactarais para…', b)}</section>
 <footer>${escHtml(b.name)}${b.footer ? ` · ${escHtml(b.footer)}` : ''}</footer></main>`;
-  return webShell({ brand: b, title: b.name, desc: [b.slogan, b.subline, 'Inmuebles disponibles'].filter(Boolean).join(' · '), image: '', url: `${origin}/w/${webId}`, body: `<div id="hitctx" data-w="${webId}" data-p="bio" hidden></div>` + body, script: LEAD_SCRIPT });
+  return webShell({ brand: b, title: b.name, desc: [b.slogan, b.subline, shop ? 'Novedades' : 'Inmuebles disponibles'].filter(Boolean).join(' · '), image: '', url: `${origin}/w/${webId}`, body: `<div id="hitctx" data-w="${webId}" data-p="bio" hidden></div>` + body, script: LEAD_SCRIPT });
 }
 const leadHits = new Map();
 async function handleWeb(req, res, url) {
@@ -1517,7 +1518,7 @@ function publishCaption(item){const lines=String(item.caption||'').replace(/\r/g
  if(item.propertyRef&&item.type!=='Historia'&&!/\bREF\.\s*\S/i.test(out))out+=`\n\n📩 Pide información o visita · REF. ${item.propertyRef}`;
  out=out.replace(/\n{3,}/g,'\n\n').trim();return tags?`${out}\n\n${tags}`:out}
 // Puntos clave para redes a partir de la ficha y la descripción del portal (sin el texto legal ni de impuestos)
-function featureBullets(p){const raw=[p.description,p.extras,p.other].filter(Boolean).join(' '),d=raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''),out=[],add=t=>{if(out.length<7&&!out.includes(t))out.push(t)};
+function featureBullets(p){if(p.sizes||p.colors||p.material)return[p.sizes&&`👗 Tallas: ${p.sizes}`,p.colors&&`🎨 Colores: ${p.colors}`,p.material&&`🧵 ${p.material}`,...String(p.extras||'').split(/\s*[·,]\s*/).filter(Boolean).slice(0,3).map(x=>`✨ ${x.charAt(0).toUpperCase()+x.slice(1)}`)].filter(Boolean);const raw=[p.description,p.extras,p.other].filter(Boolean).join(' '),d=raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''),out=[],add=t=>{if(out.length<7&&!out.includes(t))out.push(t)};
  const has=r=>r.test(d),acc=has(/movilidad reducida|accesib|adaptad/);
  const facts=[p.built,p.beds,p.baths].filter(Boolean).join(' · ');if(facts)add('📐 '+facts);
  // Por orden de importancia para quien busca vivienda
@@ -1547,16 +1548,16 @@ function captionFor(item,net,ctx={}){let t=publishCaption(item);const lines=t.sp
   body=`${first}\n\n${intro?intro.replace(/\b[A-ZÁÉÍÓÚÜÑ]{5,}\b/g,w=>w.toLowerCase())+'\n\n':''}${bullets.join('\n')}${story}`}}
  if(p&&item.type!=='Historia'){const bl=body.split('\n');let i=bl.findIndex(l=>l.trim());if(i>=0){let h=bl[i].trim().replace(/[.,;:]+$/,'');
   // Primera línea con lo que se busca: tipo, zona y precio (es lo que se ve antes de «más»)
-  if(city[0]&&!h.toLowerCase().includes(city[0].toLowerCase()))h+=` en ${city[0]}`;{const c=city.at(-1);if(c&&c!==city[0]&&!h.toLowerCase().includes(c.toLowerCase()))h+=` · ${c}`}if(p.price&&!body.includes(p.price)&&!['reservado','vendido'].includes(p.stamp))h+=` · ${p.price}`;
-  if(!/^\p{Extended_Pictographic}/u.test(h))h=(p.operation==='Alquiler'?'🔑 ':'🏡 ')+h;bl[i]=h;body=bl.join('\n')}}
+  if(!ctx.shop){if(city[0]&&!h.toLowerCase().includes(city[0].toLowerCase()))h+=` en ${city[0]}`;{const c=city.at(-1);if(c&&c!==city[0]&&!h.toLowerCase().includes(c.toLowerCase()))h+=` · ${c}`}}if(p.price&&!body.includes(p.price)&&!['reservado','vendido'].includes(p.stamp))h+=` · ${p.price}`;
+  if(!/^\p{Extended_Pictographic}/u.test(h))h=(ctx.shop?'✨ ':p.operation==='Alquiler'?'🔑 ':'🏡 ')+h;bl[i]=h;body=bl.join('\n')}}
  const ref=item.propertyRef?` · REF. ${item.propertyRef}`:'';
  body=body.replace(/\n*📩 Pide información o visita · REF\. [^\n]*$/,'');
  if(net==='instagram'){body=body.replace(/https?:\/\/\S+/g,'el enlace de la bio');
-  const hasRef=/\bREF\.\s*\S/.test(body);if(item.type!=='Historia'&&!/bio|mensaje|privado|dm\b/i.test(body))body+=`\n\n📩 Escríbenos por mensaje o pide tu visita en el enlace de la bio${hasRef?'':ref}`;else if(ref&&!/\bREF\.\s*\S/.test(body)&&item.type!=='Historia')body+=`\n\n📩 Pide información${ref}`}
- else{body=body.replace(/(en el |el )?enlace (de|en) la bio/gi,ctx.webUrl?'este enlace':'nuestra web');if(item.type!=='Historia'){if(ctx.webUrl)body+=`\n\n👉 Más fotos y pide tu visita${/\bREF\.\s*\S/.test(body)?'':ref}: ${ctx.webUrl}`;else if(ref&&!/\bREF\.\s*\S/.test(body))body+=`\n\n📩 Escríbenos para más información${ref}`}}
+  const hasRef=/\bREF\.\s*\S/.test(body);if(item.type!=='Historia'&&!(ctx.shop?/bio|mensaje|privado|dm\b|escr[ií]benos|tienda/i:/bio|mensaje|privado|dm\b/i).test(body))body+=`\n\n📩 Escríbenos por mensaje o ${ctx.shop?'pásate por la tienda':'pide tu visita en el enlace de la bio'}${hasRef?'':ref}`;else if(ref&&!/\bREF\.\s*\S/.test(body)&&item.type!=='Historia')body+=`\n\n📩 Pide información${ref}`}
+ else{body=body.replace(/(en el |el )?enlace (de|en) la bio/gi,ctx.webUrl?'este enlace':'nuestra web');if(item.type!=='Historia'){if(ctx.webUrl)body+=`\n\n👉 ${ctx.shop?'Más fotos y precio':'Más fotos y pide tu visita'}${/\bREF\.\s*\S/.test(body)?'':ref}: ${ctx.webUrl}`;else if(ref&&!/\bREF\.\s*\S/.test(body))body+=`\n\n📩 Escríbenos para más información${ref}`}}
  // Hashtags: los más útiles primero (tipo + zona, zona, operación, marca); 5 en Instagram, 3 en Facebook
  const brandT=(ctx.tags||[]).map(x=>'#'+String(x).replace(/^#/,'').toLowerCase()),zones=city.map(c=>c.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,'').toLowerCase());
- const score=h=>{const l=h.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');return(/en(venta|alquiler)|(piso|casa|chalet|atico|duplex|apartamento|vivienda|local|nave|terreno)en/.test(l)?4:0)+(zones.some(z=>z&&l.includes(z))?3:0)+(brandT.includes(l)?2:0)};
+ const score=h=>{const l=h.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');return(/en(venta|alquiler)|(piso|casa|chalet|atico|duplex|apartamento|vivienda|local|nave|terreno)en/.test(l)?4:0)+(zones.some(z=>z&&l.includes(z))?3:0)+(brandT.includes(l)?2:0)+(ctx.shop&&/moda|tienda|novedad|rebaja/.test(l)?3:0)};
  tags=[...new Set(tags.map(h=>h.trim()))].map((h,i)=>({h,i,s:score(h)})).sort((a,b)=>b.s-a.s||a.i-b.i).slice(0,net==='instagram'?5:3).map(x=>x.h);{const own=[...new Set((tagIdx>=0?lines.slice(tagIdx).join(' ').match(/#[^\s#]+/g):[])||[])].find(h=>brandT.includes(h.toLowerCase()));if(own&&!tags.includes(own))tags[tags.length-1]=own}
  body=body.replace(/\n{3,}/g,'\n\n').trim().slice(0,2100);return tags.length?`${body}\n\n${tags.join(' ')}`:body}
 const publishing = new Set();
@@ -1573,7 +1574,7 @@ async function publishItem(brandId, item) {
     const urls = media.map(m => ({ ...m, url: publicMediaUrl(brandId, String(item.id), m.file) }));
     const images = urls.filter(m => m.type === 'image'), video = urls.find(m => m.type === 'video');
     const st0 = await readStore(), brand = st0.brands.find(b => b.id === brandId) || {}, prop = (brandDataOf(st0, brandId).properties || []).find(x => String(x.reference) === String(item.propertyRef)) || null;
-    const ctx = { tags: String(brand.tags || '').split(/[\s,#]+/).filter(Boolean), prop, webUrl: prop && brand.webId && prop.web !== false ? `${PUBLIC_URL}/w/${brand.webId}/${prop.id}` : '' };
+    const ctx = { shop: brand.kind === 'tienda', tags: String(brand.tags || '').split(/[\s,#]+/).filter(Boolean), prop, webUrl: prop && brand.webId && prop.web !== false ? `${PUBLIC_URL}/w/${brand.webId}/${prop.id}` : '' };
     const caption = captionFor(item, 'instagram', ctx), captionFb = captionFor(item, 'facebook', ctx), ch = String(item.channel || ''), links = {};
     const toIG = /instagram/i.test(ch) && page.igId, toFB = /facebook/i.test(ch) || (!toIG && !/instagram/i.test(ch));
     if (/instagram/i.test(ch) && !page.igId) throw new Error('La página de Facebook conectada no tiene una cuenta de Instagram profesional vinculada');
