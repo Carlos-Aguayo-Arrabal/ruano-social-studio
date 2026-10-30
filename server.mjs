@@ -1533,8 +1533,35 @@ const META_SCOPES = 'pages_show_list,pages_read_engagement,pages_manage_posts,in
 const metaDir = join(dataDir, 'meta'), mediaDir = join(dataDir, 'media');
 await mkdir(metaDir, { recursive: true }); await mkdir(mediaDir, { recursive: true });
 const safeKey = k => (/^[A-Za-z0-9_-]{1,40}$/.test(String(k || '')) ? String(k) : null);
-async function readMeta(brandId) { try { return JSON.parse(await readFile(join(metaDir, `${brandId}.json`), 'utf8')); } catch { return null; } }
-const writeMeta = (brandId, m) => writeAtomic(join(metaDir, `${brandId}.json`), JSON.stringify(m));
+// Encrypt Meta page tokens at rest. Changing the session secret requires a token migration/reconnection.
+const metaCryptoKey = crypto.createHash('sha256').update('momentun-meta-tokens-v1:' + sessionSecret).digest();
+function encryptMetaTokens(tokens = {}) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', metaCryptoKey, iv);
+  const data = Buffer.concat([cipher.update(JSON.stringify(tokens), 'utf8'), cipher.final()]);
+  return { v: 1, iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), data: data.toString('base64') };
+}
+function decryptMetaTokens(payload) {
+  const decipher = crypto.createDecipheriv('aes-256-gcm', metaCryptoKey, Buffer.from(payload.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(payload.tag, 'base64'));
+  return JSON.parse(Buffer.concat([decipher.update(Buffer.from(payload.data, 'base64')), decipher.final()]).toString('utf8'));
+}
+async function readMeta(brandId) {
+  let raw;
+  try { raw = JSON.parse(await readFile(join(metaDir, `${brandId}.json`), 'utf8')); }
+  catch (err) { if (err.code === 'ENOENT') return null; throw err; }
+  if (raw.encryptedTokens) return { ...raw, tokens: decryptMetaTokens(raw.encryptedTokens), encryptedTokens: undefined };
+  if (raw.tokens) { // Safely migrate legacy plaintext tokens on first read.
+    await writeMeta(brandId, raw);
+    return raw;
+  }
+  return raw;
+}
+async function writeMeta(brandId, m) {
+  const { tokens, encryptedTokens, ...rest } = m;
+  const secure = { ...rest, encryptedTokens: encryptMetaTokens(tokens || (encryptedTokens ? decryptMetaTokens(encryptedTokens) : {})) };
+  await writeAtomic(join(metaDir, `${brandId}.json`), JSON.stringify(secure));
+}
 const metaPublic = m => m ? { connected: !!m.selected, user: m.user || '', selected: m.selected || null, pages: (m.pages || []).map(x => ({ id: x.id, name: x.name, igId: x.igId || null, igUsername: x.igUsername || null })), connectedAt: m.connectedAt } : { connected: false, pages: [] };
 async function graph(method, path, params = {}) {
   const url = new URL(`${GRAPH}/${path.replace(/^\//, '')}`);
@@ -1641,6 +1668,7 @@ function captionFor(item,net,ctx={}){let t=publishCaption(item);const lines=t.sp
  body=body.replace(/\n{3,}/g,'\n\n').trim().slice(0,2100);return tags.length?`${body}\n\n${tags.join(' ')}`:body}
 const publishing = new Set();
 async function publishItem(brandId, item) {
+  if (!['approved', 'scheduled'].includes(item.status)) return;
   const key = `${brandId}:${item.id}`;
   if (publishing.has(key)) return;
   publishing.add(key);
@@ -1797,6 +1825,7 @@ async function handleMeta(req, res, url, user) {
     const it = (brandDataOf(await readStore(), brandId).content || []).find(x => String(x.id) === String(body.contentId));
     if (!it) return sendJson(res, 404, { error: 'Publicación no encontrada' });
     if (it.metaStatus === 'published') return sendJson(res, 400, { error: 'Ya está publicada' });
+    if (!['approved', 'scheduled'].includes(it.status)) return sendJson(res, 409, { error: 'Aprueba la publicación antes de enviarla a Meta' });
     publishItem(brandId, it);
     return sendJson(res, 202, { ok: true });
   }
