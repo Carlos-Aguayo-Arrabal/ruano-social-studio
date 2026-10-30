@@ -765,7 +765,7 @@ function captionFor(item,net,ctx={}){let t=publishText(item);const lines=t.split
  let tags=tagIdx>=0?lines.slice(tagIdx).join(' ').match(/#[^\s#]+/g)||[]:[],body=(tagIdx>=0?lines.slice(0,tagIdx):lines).join('\n').trim();
  const ACR=/^(REF|IBI|WIFI|DM|URL|GPS)$/;
  // Palabras en MAYÚSCULAS (de WITEI) a minúscula: en redes parecen gritos
- body=body.replace(/\b[A-ZÁÉÍÓÚÜÑ]{5,}\b/g,w=>ACR.test(w)?w:w.toLowerCase()).replace(/(^|[.!?]\s+|\n)([a-záéíóúüñ])/g,(m,a,b)=>a+b.toUpperCase());
+ if(!ctx.shop)body=body.replace(/\b[A-ZÁÉÍÓÚÜÑ]{5,}\b/g,w=>ACR.test(w)?w:w.toLowerCase()).replace(/(^|[.!?]\s+|\n)([a-záéíóúüñ])/g,(m,a,b)=>a+b.toUpperCase());
  const p=ctx.prop,city=p?String(p.location||'').split(',').map(x=>x.trim()).filter(Boolean):[];
  if(p&&item.type!=='Historia'&&(!item.campaign||item.campaign==='nuevo')&&p.description){const bullets=featureBullets(p);if(bullets.length>=3){
   const first=body.split('\n').find(l=>l.trim())||String(p.title||'');
