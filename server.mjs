@@ -1057,7 +1057,7 @@ function publicProp(p, shop = false) {
   return {
     id: String(p.id), ref: clip(p.reference, 20), title: niceTitleSrv(clip(p.title, 160), p), operation: clip(p.operation, 20) || 'Venta',
     location: clip(p.location, 80), price: clip(p.price, 30), oldPrice: stamp === 'precio' ? clip(p.oldPrice, 30) : '',
-    facts: (shop ? [p.sizes && `Tallas: ${p.sizes}`, p.colors && `Colores: ${p.colors}`, p.material] : [p.built, p.useful, p.beds, p.baths, p.floor]).map(x => clip(x, 60)).filter(Boolean),
+    facts: (shop ? [p.sizes && (/^(única|unica|talla única|tu)$/i.test(String(p.sizes).trim()) ? 'Talla única' : `Tallas: ${p.sizes}`), p.colors && `Colores: ${p.colors}`, p.material] : [p.built, p.useful, p.beds, p.baths, p.floor]).map(x => clip(x, 60)).filter(Boolean),
     extras: clip(p.extras, 300), description: clip(p.description, 4000),
     stamp, stampLabel: shop ? SHOP_STAMPS[stamp] || '' : stamp === 'vendido' && p.operation === 'Alquiler' ? 'Alquilado' : WEB_STAMPS[stamp] || '',
   };
@@ -1597,7 +1597,7 @@ function publishCaption(item){const lines=String(item.caption||'').replace(/\r/g
  if(item.propertyRef&&item.type!=='Historia'&&!/\bREF\.\s*\S/i.test(out))out+=`\n\n📩 Pide información o visita · REF. ${item.propertyRef}`;
  out=out.replace(/\n{3,}/g,'\n\n').trim();return tags?`${out}\n\n${tags}`:out}
 // Puntos clave para redes a partir de la ficha y la descripción del portal (sin el texto legal ni de impuestos)
-function featureBullets(p){if(p.sizes||p.colors||p.material)return[p.sizes&&`👗 Tallas: ${p.sizes}`,p.colors&&`🎨 Colores: ${p.colors}`,p.material&&`🧵 ${p.material}`,...String(p.extras||'').split(/\s*[·,]\s*/).filter(Boolean).slice(0,3).map(x=>`✨ ${x.charAt(0).toUpperCase()+x.slice(1)}`)].filter(Boolean);const raw=[p.description,p.extras,p.other].filter(Boolean).join(' '),d=raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''),out=[],add=t=>{if(out.length<7&&!out.includes(t))out.push(t)};
+function featureBullets(p){if(p.sizes||p.colors||p.material)return[p.sizes&&(/^(única|unica|talla única|tu)$/i.test(String(p.sizes).trim())?"👗 Talla única":`👗 Tallas: ${p.sizes}`),p.colors&&`🎨 Colores: ${p.colors}`,p.material&&`🧵 ${p.material}`,...String(p.extras||'').split(/\s*[·,]\s*/).filter(Boolean).slice(0,3).map(x=>`✨ ${x.charAt(0).toUpperCase()+x.slice(1)}`)].filter(Boolean);const raw=[p.description,p.extras,p.other].filter(Boolean).join(' '),d=raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''),out=[],add=t=>{if(out.length<7&&!out.includes(t))out.push(t)};
  const has=r=>r.test(d),acc=has(/movilidad reducida|accesib|adaptad/);
  const facts=[p.built,p.beds,p.baths].filter(Boolean).join(' · ');if(facts)add('📐 '+facts);
  // Por orden de importancia para quien busca vivienda

@@ -351,7 +351,7 @@ function brandSlug(){return String(BRAND.name||'marca').normalize('NFD').replace
 // Tiendas (ropa, comercio): mismos fotos, reels y calendario, con productos en lugar de inmuebles
 function SHOP(){return typeof BRAND!=='undefined'&&BRAND?.kind==='tienda'}
 function shopify(t){return SHOP()?String(t).replace(/\binmuebles\b/g,'productos').replace(/\bInmuebles\b/g,'Productos').replace(/\binmueble\b/g,'producto').replace(/\bInmueble\b/g,'Producto').replace(/\bla vivienda\b/g,'el producto'):t}
-function shopFacts(p){return[p.sizes&&`Tallas ${p.sizes}`,p.colors,p.material].filter(Boolean)}
+function shopFacts(p){return[p.sizes&&(/^(única|unica|talla única|tu)$/i.test(String(p.sizes).trim())?'Talla única':`Tallas ${p.sizes}`),p.colors,p.material].filter(Boolean)}
 function applyKind(){const shop=SHOP(),q=x=>document.querySelector(x),set=(x,re,sh,attr)=>{const el=q(x);if(el){if(attr)el[attr]=shop?sh:re;else el.textContent=shop?sh:re}};
  document.body.classList.toggle('kind-shop',shop);
  {const nav=q('.nav-item[data-view="assets"]');if(nav&&nav.lastChild)nav.lastChild.textContent=shop?' Productos':' Inmuebles'}
@@ -618,7 +618,7 @@ function metaBadge(x){if(x.metaStatus==='published')return'<div class="client-re
  if(x.autoPublish&&x.status!=='published')return`<div class="client-review">📲 Se publicará el ${esc(formatDate(x.date))} a las ${esc(x.time||'13:00')}${x.status==='pending'?' (cuando se apruebe)':''}</div>`;return''}
 // ─── Vista previa en Instagram: cómo se verá en el feed, en reels, en historias y en la cuadrícula del perfil ───
 const igPrev={item:null,list:[],i:0,open:false,tab:'post',dur:0};
-function igUser(){const p=metaState?.pages?.find(x=>x.id===metaState.selected);return p?.igUsername||brandSlug().replace(/-/g,'')}
+function igUser(){const p=metaState?.pages?.find(x=>x.id===metaState.selected);return p?.igUsername||(String(BRAND.footer||'').match(/@([A-Za-z0-9._]{2,30})/)||[])[1]||brandSlug().replace(/-/g,'')}
 function igAvatar(){return BRAND.logo?`<span class="ig-av"><img src="${esc(BRAND.logo)}" alt=""></span>`:`<span class="ig-av" style="background:${esc(BRAND.color||'#0d447f')}">${esc(String(BRAND.name||'?')[0])}</span>`}
 function igRich(t){return esc(t).replace(/(^|[\s(])([#@][\wáéíóúüñÁÉÍÓÚÜÑ.]+)/g,'$1<span class="ig-tag">$2</span>')}
 function igCaption(){const it=igPrev.item,v=document.querySelector('#composerForm')?.elements.caption?.value;return igText({...it,caption:v||it.caption})}
@@ -745,7 +745,7 @@ function publishText(item){const lines=String(item.caption||'').replace(/\r/g,''
  if(item.propertyRef&&item.type!=='Historia'&&!/\bREF\.\s*\S/i.test(out))out+=`\n\n📩 Pide información o visita · REF. ${item.propertyRef}`;
  out=out.replace(/\n{3,}/g,'\n\n').trim();return tags?`${out}\n\n${tags}`:out}
 // Puntos clave para redes a partir de la ficha y la descripción del portal (sin el texto legal ni de impuestos)
-function featureBullets(p){if(p.sizes||p.colors||p.material)return[p.sizes&&`👗 Tallas: ${p.sizes}`,p.colors&&`🎨 Colores: ${p.colors}`,p.material&&`🧵 ${p.material}`,...String(p.extras||'').split(/\s*[·,]\s*/).filter(Boolean).slice(0,3).map(x=>`✨ ${x.charAt(0).toUpperCase()+x.slice(1)}`)].filter(Boolean);const raw=[p.description,p.extras,p.other].filter(Boolean).join(' '),d=raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''),out=[],add=t=>{if(out.length<7&&!out.includes(t))out.push(t)};
+function featureBullets(p){if(p.sizes||p.colors||p.material)return[p.sizes&&(/^(única|unica|talla única|tu)$/i.test(String(p.sizes).trim())?"👗 Talla única":`👗 Tallas: ${p.sizes}`),p.colors&&`🎨 Colores: ${p.colors}`,p.material&&`🧵 ${p.material}`,...String(p.extras||'').split(/\s*[·,]\s*/).filter(Boolean).slice(0,3).map(x=>`✨ ${x.charAt(0).toUpperCase()+x.slice(1)}`)].filter(Boolean);const raw=[p.description,p.extras,p.other].filter(Boolean).join(' '),d=raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''),out=[],add=t=>{if(out.length<7&&!out.includes(t))out.push(t)};
  const has=r=>r.test(d),acc=has(/movilidad reducida|accesib|adaptad/);
  const facts=[p.built,p.beds,p.baths].filter(Boolean).join(' · ');if(facts)add('📐 '+facts);
  // Por orden de importancia para quien busca vivienda
@@ -1222,7 +1222,7 @@ function propertyHashtags(p,campaign){
  const seen=new Set();return tags.filter(t=>t&&!seen.has(t.toLowerCase())&&seen.add(t.toLowerCase())).slice(0,12).map(t=>'#'+t).join(' ')}
 function addHashtags(p,ref,campaign){const tags=propertyHashtags(p,campaign);content.filter(x=>x.propertyRef===ref&&x.type!=='Historia'&&!x.caption.includes('#'+(brandTags()[0]||''))).forEach(x=>{x.caption=`${x.caption.trimEnd()}\n\n${tags}`})}
 function generateShopPack(p,ref){const day=n=>{const d=new Date();d.setDate(d.getDate()+n);return isoDate(d)},desc=cleanDescription(p.description),hook=desc?firstSentence(desc):'',fx=shopFacts(p),price=p.price||'',pr=price?' · '+price:'',
-  det=(p.extras||'').split(' · ').filter(Boolean),lines=[p.sizes&&`👗 Tallas: ${p.sizes}`,p.colors&&`🎨 Colores: ${p.colors}`,p.material&&`🧵 ${p.material}`,...det.slice(0,3).map(d=>`✨ ${d.charAt(0).toUpperCase()+d.slice(1)}`)].filter(Boolean).join('\n'),
+  det=(p.extras||'').split(' · ').filter(Boolean),lines=[p.sizes&&(/^(única|unica|talla única|tu)$/i.test(String(p.sizes).trim())?"👗 Talla única":`👗 Tallas: ${p.sizes}`),p.colors&&`🎨 Colores: ${p.colors}`,p.material&&`🧵 ${p.material}`,...det.slice(0,3).map(d=>`✨ ${d.charAt(0).toUpperCase()+d.slice(1)}`)].filter(Boolean).join('\n'),
   base={channel:'Instagram + Facebook',status:'pending',propertyRef:ref,campaign:'nuevo',campaignKey:'nuevo'},now=Date.now();
  content.unshift(
   {...base,id:now+1,title:`REF. ${ref} · Novedad · Publicación`,type:'Publicación',date:day(1),caption:`✨ Novedad: ${p.title}${pr}\n\n${desc?trimText(desc,600)+'\n\n':''}${lines?lines+'\n\n':''}📍 Pásate por la tienda o escríbenos por mensaje y te lo guardamos · REF. ${ref}`,icon:'⌂'},
