@@ -161,6 +161,55 @@ Formatos:
 - historias: de 3 a 5 pantallas, una por línea y numeradas ("1. ..."), con frases muy cortas; la última pide escribir o usar el enlace.
 - reel: guion con "Gancho:" (primeros 3 segundos), "Escenas:" (una línea por escena con el texto en pantalla) y "Cierre:", más una línea "Texto:" con un pie breve de 150 a 300 caracteres.`;
 
+// Tiendas de ropa y comercios: mismas reglas de fondo, con producto en lugar de inmueble
+const AI_SYSTEM_SHOP = `Eres el redactor de redes sociales de {TIENDA}. Escribes en español de España, cercano y con estilo, para Instagram y Facebook.
+
+Reglas que no se pueden saltar:
+- Usa solo los datos de la ficha del producto. No inventes tejidos, tallas, colores, medidas, stock, descuentos, envíos ni ningún otro dato. Si un dato no está, no lo menciones.
+- No escribas hashtags: la aplicación los añade después.
+- No hagas comentarios sobre el cuerpo ni prometas que una prenda adelgaza, estiliza o disimula. No dirijas el producto a un perfil por edad, origen u otras características personales.
+- Puedes sugerir ocasiones y combinaciones de forma general (para el día a día, para una celebración, con zapato plano…), sin inventar otras prendas de la tienda.
+- Emojis con moderación (como mucho uno por párrafo) y sin abusar de mayúsculas.
+- La primera línea de cada texto debe enganchar por sí sola (en Instagram solo se ven unos 125 caracteres antes del "más") y debe decir qué es y su precio si lo hay.
+- Cierra con una llamada a la acción: pasarse por la tienda o escribir por mensaje para reservarlo, con el contacto que se indica.
+
+Formatos:
+- publicacion: texto para el pie de una publicación de feed, de 300 a 800 caracteres, en párrafos cortos. Incluye la referencia.
+- carrusel: pie del carrusel (250 a 600 caracteres) y, al final, una línea "Diapositivas:" seguida de 5 a 8 líneas numeradas con el texto breve que irá sobre cada foto (prenda entera, detalles, tejido, cómo queda, combinación y cierre).
+- historias: de 3 a 5 pantallas, una por línea y numeradas ("1. ..."), con frases muy cortas; la última pide escribir para reservarlo o pasarse por la tienda.
+- reel: guion con "Gancho:" (primeros 3 segundos), "Escenas:" (una línea por escena con el texto en pantalla) y "Cierre:", más una línea "Texto:" con un pie breve de 150 a 300 caracteres.`;
+const OLLAMA_SYSTEM_SHOP = `Eres redactor de redes sociales de {TIENDA}. Escribe en español de España, correcto, cercano y natural.
+
+OBLIGATORIO:
+1. Usa solo los datos de la ficha del producto. No inventes nada (ni tejidos, ni tallas, ni descuentos).
+2. Incluye siempre el precio (si lo hay) y la referencia en la publicación.
+3. NO escribas hashtags (#).
+4. NO hables del cuerpo ni digas que una prenda adelgaza o estiliza.
+5. Como mucho 2 emojis en todo el texto.
+6. Termina invitando a pasar por la tienda o a escribir para reservarlo, con el contacto.
+
+FORMATOS:
+- publicacion: 2 o 3 párrafos cortos (300-700 caracteres). Primera frase atractiva con qué es y el precio.
+- carrusel: un párrafo de 250-450 caracteres y después "Diapositivas:" con 5 a 7 líneas numeradas, una por foto.
+- historias: de 3 a 5 líneas numeradas ("1. ...", "2. ..."), cada una en su propia línea, de menos de 70 caracteres.
+- reel: líneas "Gancho:", "Escenas:" (varias líneas cortas), "Cierre:" y "Texto:" con un pie de 150-300 caracteres.`;
+const CAMPAIGN_BRIEF_SHOP = {
+  nuevo: 'Novedad recién llegada a la tienda: preséntala con ganas y cuenta lo mejor que tiene.',
+  precio: 'Rebaja: destaca el precio anterior, el nuevo y el ahorro, sin presionar.',
+  ultimas: 'Últimas unidades: quedan pocas tallas o unidades; crea algo de urgencia sin exagerar y sin inventar cuántas quedan.',
+  vendido: 'El producto se ha agotado: celébralo sin dar el precio, da las gracias e invita a seguir la cuenta para ver las próximas novedades.',
+  destacado: 'Favorito de la semana: preséntalo como la prenda elegida de la semana, resalta lo mejor que tiene e invita a pasar por la tienda.',
+};
+const TONES_SHOP = { cercano: 'cercano y cálido', profesional: 'cuidado y sobrio', lujo: 'elegante, de boutique', dinamico: 'dinámico y desenfadado, para público joven' };
+function productSheet(p = {}) {
+  const rows = [
+    ['Referencia', clip(p.reference, 40)], ['Producto', clip(p.title, 200)], ['Categoría', clip(p.location, 120)],
+    ['Precio', clip(p.price, 40)], ['Precio anterior', clip(p.oldPrice, 40)], ['Tallas', clip(p.sizes, 80)],
+    ['Colores', clip(p.colors, 80)], ['Tejido / material', clip(p.material, 80)], ['Detalles', clip(p.extras, 600)],
+  ].filter(([, v]) => v);
+  const desc = clip(p.description, 4000);
+  return rows.map(([k, v]) => `- ${k}: ${v}`).join('\n') + (desc ? `\n- Descripción:\n${desc}` : '');
+}
 const CAMPAIGN_BRIEF = {
   nuevo: 'Presentación de un inmueble recién publicado.',
   precio: 'Bajada de precio: destaca el precio anterior y el nuevo y el ahorro, sin presionar.',
@@ -195,6 +244,7 @@ function aiAllowed() {
 // Las instrucciones se escriben para Ruano; con otra empresa se cambia el nombre y la zona
 function systemFor(base, brand) {
   const name = clip(brand?.name, 80), zone = clip(brand?.zone, 60);
+  if (brand?.kind === 'tienda') return (base === OLLAMA_SYSTEM ? OLLAMA_SYSTEM_SHOP : AI_SYSTEM_SHOP).replace('{TIENDA}', `${name || 'una tienda'}, una tienda de ropa de ${zone || 'España'}`);
   if (!name) return base;
   return base
     .replace('Ruano Inmobiliaria, una agencia de Almería (España)', `${name}, una inmobiliaria de ${zone || 'España'}${zone ? ' (España)' : ''}`)
@@ -276,7 +326,7 @@ FORMATOS:
 
 // Limpieza de lo que el modelo pequeño a veces se salta
 const IDEAL_FOR = /(?:\b(?:ideal|perfect[oa]|pensad[oa])\s+)?\bpara\s+(?:una?\s+|tu\s+|su\s+)?(?:familias?|parejas?|estudiantes|jóvenes|jubilad[oa]s|niños|personas|adultos|inversores|matrimonios)\b[^,.!\n]*/giu;
-function tidyText(t, kind) {
+function tidyText(t, kind, shop = false) {
   let out = String(t || '')
     .replace(/(^|\s)#[\p{L}\p{N}_]+/gu, '')                      // hashtags
     .replace(/\b([\p{L}]{3,})\s+\1\b/giu, '$1')                    // "dúplex dúplex"
@@ -296,7 +346,9 @@ function tidyText(t, kind) {
     const items = out.split('\n').map(l => l.replace(/^\d{1,2}\.\s*/, '').trim()).filter(l => l.length > 2).slice(0, 5);
     out = items.map((l, i) => `${i + 1}. ${l}`).join('\n');
   }
-  if (kind === 'carrusel' && !/Diapositivas:/i.test(out)) {
+  if (kind === 'carrusel' && !/Diapositivas:/i.test(out) && shop) {
+    out += '\n\nDiapositivas:\n1. La prenda entera con el precio\n2. Detalle\n3. Tejido\n4. Cómo queda\n5. Con qué combinarla\n6. Pásate por la tienda y referencia';
+  } else if (kind === 'carrusel' && !/Diapositivas:/i.test(out)) {
     out += '\n\nDiapositivas:\n1. Portada con precio y zona\n2. Salón\n3. Cocina\n4. Dormitorios\n5. Baños\n6. Detalles y extras\n7. Contacto y referencia';
   }
   return out.replace(/\s+([,.!])/g, '$1').replace(/([.!?])[.,]+/g, '$1').replace(/\n{3,}/g, '\n\n').split('\n').map(l => l.trim()).join('\n').trim();
@@ -344,7 +396,7 @@ async function askOllamaOne(userText, schema, brand) {
       console.error('Ollama: respuesta vacía o incompleta', k, d.done_reason, String(d.message?.content).slice(0, 200));
       throw Object.assign(new Error('La IA del servidor ha devuelto un texto vacío. Inténtalo de nuevo.'), { status: 502 });
     }
-    out[k] = tidyText(out[k], k === 'texto' ? 'publicacion' : k);
+    out[k] = tidyText(out[k], k === 'texto' ? 'publicacion' : k, brand?.kind === 'tienda');
   }
   return out;
 }
@@ -410,21 +462,21 @@ async function handleAi(req, res, url) {
   if (!aiProvider()) return sendJson(res, 503, { error: !anthropic && ollama.pulling ? 'La IA se está preparando (descargando el modelo). Inténtalo en unos minutos.' : 'La IA no está disponible ahora mismo.' });
   if (!aiAllowed()) return sendJson(res, 429, { error: 'Has llegado al límite de textos con IA de esta hora. Inténtalo más tarde.' });
   const body = JSON.parse((await readRaw(req, 64 * 1024)).toString('utf8'));
-  const tone = TONES[body.tone] || TONES.cercano;
+  const shop = body.brand?.kind === 'tienda', tone = (shop ? TONES_SHOP : TONES)[body.tone] || TONES.cercano, sheet = shop ? productSheet(body.property) : propertySheet(body.property), sheetTitle = shop ? 'Ficha del producto' : 'Ficha del inmueble';
   const contact = clip(body.contact, 120) || 'pisosenalmeria.es';
   if (url.pathname === '/api/ai/captions') {
     const keys = (Array.isArray(body.types) ? body.types : []).filter(k => CAPTION_KEYS.includes(k));
     if (!keys.length) return sendJson(res, 400, { error: 'No se ha pedido ningún texto' });
-    const brief = CAMPAIGN_BRIEF[body.campaign] || CAMPAIGN_BRIEF.nuevo;
+    const brief = shop ? CAMPAIGN_BRIEF_SHOP[body.campaign] || CAMPAIGN_BRIEF_SHOP.nuevo : CAMPAIGN_BRIEF[body.campaign] || CAMPAIGN_BRIEF.nuevo;
     const extra = body.campaign === 'puertas' && body.openHouse ? `\nFecha y hora de la jornada: ${clip(body.openHouse, 80)}` : '';
     const schema = { type: 'object', properties: Object.fromEntries(keys.map(k => [k, { type: 'string' }])), required: keys, additionalProperties: false };
     const must = [body.property?.price && !['reservado', 'vendido'].includes(body.campaign) ? `precio ${clip(body.property.price, 40)}` : '', body.property?.reference ? `referencia REF. ${clip(body.property.reference, 40)}` : ''].filter(Boolean).join(' y ');
-    const prompt = `Campaña: ${brief}${extra}${must ? `\nDatos que deben aparecer en la publicación: ${must}.` : ''}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
+    const prompt = `Campaña: ${brief}${extra}${must ? `\nDatos que deben aparecer en la publicación: ${must}.` : ''}\nTono: ${tone}\nContacto para el cierre: ${contact}\nTextos que necesito: ${keys.join(', ')}\n\n${sheetTitle}:\n${sheet}`;
     return sendJson(res, 202, { job: startAiJob(async () => ({ texts: ensureEssentials(await generateAi(prompt, schema, body.brand), body.property, body.campaign, contact) })) });
   }
   if (url.pathname === '/api/ai/rewrite') {
     const kind = CAPTION_KEYS.includes(body.kind) ? body.kind : 'publicacion';
-    const prompt = `Mejora este texto de tipo "${kind}" manteniendo los datos y el formato indicado para ese tipo.\nTono: ${tone}\nContacto para el cierre: ${contact}\n${clip(body.instructions, 300) ? `Indicaciones: ${clip(body.instructions, 300)}\n` : ''}\nTexto actual:\n${clip(body.text, 4000)}\n\nFicha del inmueble:\n${propertySheet(body.property)}`;
+    const prompt = `Mejora este texto de tipo "${kind}" manteniendo los datos y el formato indicado para ese tipo.\nTono: ${tone}\nContacto para el cierre: ${contact}\n${clip(body.instructions, 300) ? `Indicaciones: ${clip(body.instructions, 300)}\n` : ''}\nTexto actual:\n${clip(body.text, 4000)}\n\n${sheetTitle}:\n${sheet}`;
     const schema = { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: false };
     return sendJson(res, 202, { job: startAiJob(async () => ({ text: (await generateAi(prompt, schema, body.brand)).texto })) });
   }
